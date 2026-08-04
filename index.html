@@ -58,26 +58,25 @@
   .row.gw label{color:#ffffff;}
   .row.gr input[type=range]{accent-color:#ff5b5b;} .row.gg input[type=range]{accent-color:#4ae06a;}
   .row.gb input[type=range]{accent-color:#4a9dff;} .row.gw input[type=range]{accent-color:#e8e8f0;}
-  .btns { display:flex; flex-direction:column; }
-  .btns .btn.rainbow { margin-top:16px; }
-  .btns .btn.bo { margin-top:auto; }
-  .btn.rainbow, .btn.bo { box-sizing:border-box; }
-  .btn.rainbow { width:53.75px; height:53.75px; aspect-ratio:1; border-radius:6px; border:none; cursor:pointer; padding:0;
-    font-weight:700; font-size:13px; user-select:none;
-    background: conic-gradient(#ff3b3b, #ffa03b, #fff23b, #4ae06a, #4a9dff, #c06ae0, #ff3b3b);
-    box-shadow: 0 0 8px rgba(255,120,120,.25); }
-  .btn.rainbow:hover { box-shadow: 0 0 12px rgba(255,120,120,.5); }
-  .btn.bo { width:53.75px; height:53.75px; aspect-ratio:1; padding:0; border-radius:6px; font-weight:700; cursor:pointer;
-    font-size:11px; display:flex; align-items:center; justify-content:center; user-select:none;
-    background:#0d0f14; color:#e04848; border:1px solid #e04848; letter-spacing:0.5px; }
-  .btn.bo:hover { background:#1a1418; }
-  .btn.bo.on { animation: boBlink 0.35s steps(1,end) infinite; }
+  .pads { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; }
+  .pad { aspect-ratio:1; background:#1d2330; border:1px solid #3a4255; border-radius:6px;
+    color:#8b93a5; font-weight:700; font-size:13px; cursor:pointer; user-select:none; }
+  .pad:hover { background:#2a3245; color:#cfd6e4; }
+  .pad.on { background:#e8b33a; border-color:#e8b33a; color:#221900; box-shadow:0 0 8px rgba(232,179,58,.4); }
+  .pad.rainbow { background: conic-gradient(#ff3b3b, #ffa03b, #fff23b, #4ae06a, #4a9dff, #c06ae0, #ff3b3b);
+    border-color:transparent; box-shadow:0 0 6px rgba(255,120,120,.25); }
+  .pad.rainbow:hover { box-shadow:0 0 10px rgba(255,120,120,.5); }
+  .pad.fade { font-size:10px; letter-spacing:1px; }
+  .pad.fade.on { background:#e8b33a; border-color:#e8b33a; color:#221900; }
+  .pad.bo { background:#0d0f14; color:#e04848; border:1px solid #e04848; font-size:10px; letter-spacing:.5px; }
+  .pad.bo:hover { background:#1a1418; }
+  .pad.bo.on { animation: boBlink 0.35s steps(1,end) infinite; }
   @keyframes boBlink { 0%,49.9% { background:#e04848; color:#fff; border-color:#e04848; }
     50%,100% { background:#0d0f14; color:#e04848; border-color:#e04848; } }
-  .padRow { display:flex; gap:8px; align-items:stretch; }
-  .padsWrap { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
+  .padRow { display:flex; flex-direction:column; gap:4px; padding:8px; box-sizing:border-box;
+    background:#171b24; border:1px solid #2c3342; border-radius:8px; }
   .padsLabel { color:#5c6476; font-size:9px; letter-spacing:1.5px; font-weight:700; text-align:center; }
-  .pads { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; flex:1; }
+  .pads { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; }
   .pad { aspect-ratio:1; background:#1d2330; border:1px solid #3a4255; border-radius:6px;
     color:#8b93a5; font-weight:700; font-size:13px; cursor:pointer; user-select:none; }
   .pad:hover { background:#2a3245; color:#cfd6e4; }
@@ -171,14 +170,8 @@
           <div class="row gb"><label>B</label><input type="range" id="ch203" min="0" max="255" value="0"><span class="val" id="v203">0</span><button class="mini" data-ch="203" title="ВКЛ/ВЫКЛ">OFF</button></div>
           <div class="row" id="speedRow" style="display:none"><label>Ченджер</label><input type="range" id="ch207" min="0" max="255" value="0"><span class="val" id="v207">0</span><button class="mini" data-ch="207" title="ВКЛ/ВЫКЛ">OFF</button></div>
           <div class="padRow">
-            <div class="padsWrap">
-              <div class="padsLabel">SCENE</div>
-              <div class="pads" id="pads"></div>
-            </div>
-            <div class="btns">
-              <button class="btn rainbow" id="rainbowBtn" title="RGBW �������"></button>
-              <button class="btn bo" id="blackoutBtn" title="BlackOut (NUM0 / Ins)">BOUT</button>
-            </div>
+            <div class="padsLabel">SCENE</div>
+            <div class="pads" id="pads"></div>
           </div>
         </div>
         <div class="masters">
@@ -213,19 +206,31 @@
   var auto206 = false, auto206Prev = 0;
   var dot = document.getElementById('dot');
 
-  // ---- сцены (пады, 12 шт) в сетке ----
+  // ---- сцены (пады) + спец-кнопки; порядок DOM = визуальные ряды сетки ----
   (function () {
     var pads = document.getElementById('pads');
-    for (var i = 1; i <= 12; i++) {
+    function scenePad(n) {
       var b = document.createElement('button');
-      b.className = 'pad'; b.textContent = i;
+      b.className = 'pad scene'; b.textContent = n;
       b.addEventListener('click', function () {
         var wasOn = this.classList.contains('on');
-        Array.prototype.forEach.call(pads.children, function (p) { p.classList.remove('on'); });
+        Array.prototype.forEach.call(pads.querySelectorAll('.pad.scene'), function (p) { p.classList.remove('on'); });
         if (!wasOn) this.classList.add('on');
       });
-      pads.appendChild(b);
+      return b;
     }
+    var rb = document.createElement('button');
+    rb.className = 'pad rainbow'; rb.id = 'rainbowBtn'; rb.title = 'RGBW палитра';
+    var fb = document.createElement('button');
+    fb.className = 'pad fade'; fb.id = 'fadeBtn'; fb.title = 'Fade — плавное переключение сцен';
+    fb.textContent = 'FADE';
+    var bb = document.createElement('button');
+    bb.className = 'pad bo'; bb.id = 'blackoutBtn'; bb.title = 'BlackOut (NUM0 / Ins)';
+    bb.textContent = 'BOUT';
+    // ряды: 1 2 3 4 Колесо / 6 7 8 9 FADE / 11 12 5 10 BOUT
+    [1, 2, 3, 4, rb, 6, 7, 8, 9, fb, 11, 12, 5, 10, bb].forEach(function (x) {
+      pads.appendChild(typeof x === 'number' ? scenePad(x) : x);
+    });
   })();
 
   function host() { return location.hostname || '127.0.0.1'; }
@@ -331,6 +336,12 @@
     apply();
   }
   document.getElementById('blackoutBtn').onclick = function () { toggleBlackout(); };
+  // Fade: тумблер плавного переключения сцен (логика подключится со сценами)
+  var fade = false;
+  document.getElementById('fadeBtn').onclick = function () {
+    fade = !fade;
+    this.classList.toggle('on', fade);
+  };
   document.addEventListener('keydown', function (e) {
     var tag = (document.activeElement || {}).tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;   // не мешаем ручному вводу
