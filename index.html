@@ -1,14 +1,14 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lumina Web-bord — COB faders</title>
+<title>Lumina Web-bord вЂ” COB faders</title>
 <style>
   html, body { margin: 0; padding: 0; height: 100%; background: #0b0b0e; font-family: Segoe UI, Arial, sans-serif; }
   #arenaFrame { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; background: #111; }
 
-  /* ---- плавающий пульт ---- */
+  /* ---- РїР»Р°РІР°СЋС‰РёР№ РїСѓР»СЊС‚ ---- */
   #panel {
     position: fixed; left: 24px; top: 24px; z-index: 9999;
     width: 500px; background: #14141a;
@@ -34,7 +34,7 @@
   .cols { display:flex; gap:14px; align-items:stretch; }
   .mainCol { flex:1; min-width:0; display:flex; flex-direction:column; }
 
-  /* ---- ColorChanger: полноширинный, обычный фейдер + шкала CH7 ---- */
+  /* ---- ColorChanger: РїРѕР»РЅРѕС€РёСЂРёРЅРЅС‹Р№, РѕР±С‹С‡РЅС‹Р№ С„РµР№РґРµСЂ + С€РєР°Р»Р° CH7 ---- */
   .changer { background:#171b24; border:1px solid #2c3342; border-radius:8px; padding:7px 9px 5px; }
   .changer .top { display:flex; align-items:center; gap:8px; margin-bottom:1px; }
   .changer .top label { flex:1; font-size:11px; color:#fff; font-weight:700; letter-spacing:.3px; }
@@ -59,14 +59,16 @@
   .row.gr input[type=range]{accent-color:#ff5b5b;} .row.gg input[type=range]{accent-color:#4ae06a;}
   .row.gb input[type=range]{accent-color:#4a9dff;} .row.gw input[type=range]{accent-color:#e8e8f0;}
   .btns { display:flex; flex-direction:column; }
-  .btns .btn.rainbow { margin-top:26px; }
+  .btns .btn.rainbow { margin-top:16px; }
   .btns .btn.bo { margin-top:auto; }
-  .btn.rainbow { width:44px; height:44px; border-radius:50%; border:none; cursor:pointer; padding:0;
+  .btn.rainbow, .btn.bo { box-sizing:border-box; }
+  .btn.rainbow { width:53.75px; height:53.75px; aspect-ratio:1; border-radius:6px; border:none; cursor:pointer; padding:0;
+    font-weight:700; font-size:13px; user-select:none;
     background: conic-gradient(#ff3b3b, #ffa03b, #fff23b, #4ae06a, #4a9dff, #c06ae0, #ff3b3b);
     box-shadow: 0 0 8px rgba(255,120,120,.25); }
   .btn.rainbow:hover { box-shadow: 0 0 12px rgba(255,120,120,.5); }
-  .btn.bo { width:44px; height:44px; padding:0; border:none; border-radius:7px; font-weight:700; cursor:pointer;
-    font-size:10px; display:flex; align-items:center; justify-content:center; box-sizing:border-box;
+  .btn.bo { width:53.75px; height:53.75px; aspect-ratio:1; padding:0; border-radius:6px; font-weight:700; cursor:pointer;
+    font-size:11px; display:flex; align-items:center; justify-content:center; user-select:none;
     background:#0d0f14; color:#e04848; border:1px solid #e04848; letter-spacing:0.5px; }
   .btn.bo:hover { background:#1a1418; }
   .btn.bo.on { animation: boBlink 0.35s steps(1,end) infinite; }
@@ -81,7 +83,7 @@
   .pad:hover { background:#2a3245; color:#cfd6e4; }
   .pad.on { background:#e8b33a; border-color:#e8b33a; color:#221900; box-shadow:0 0 8px rgba(232,179,58,.4); }
 
-  /* ---- всплывающая подсказка по [i] ---- */
+  /* ---- РІСЃРїР»С‹РІР°СЋС‰Р°СЏ РїРѕРґСЃРєР°Р·РєР° РїРѕ [i] ---- */
   #tip { position:absolute; right:44px; top:38px; width:250px; z-index:10000;
     background:#1b2029; border:1px solid #3a4255; border-radius:8px;
     box-shadow:0 8px 24px rgba(0,0,0,.55); padding:9px 11px;
@@ -90,7 +92,7 @@
   #tip b { color:#fff; }
   .hint { margin-top:9px; font-size:11px; color:#b6bdcc; line-height:1.6; }
 
-  /* ---- вертикальные ведущие: Диммер / Строб ---- */
+  /* ---- РІРµСЂС‚РёРєР°Р»СЊРЅС‹Рµ РІРµРґСѓС‰РёРµ: Р”РёРјРјРµСЂ / РЎС‚СЂРѕР± ---- */
   .masters { display:flex; gap:10px; align-items:stretch; }
   .vrow { display:flex; flex-direction:column; align-items:center; gap:6px; width:64px;
     background:#171b24; border:1px solid #2c3342; border-radius:8px; padding:8px 5px 8px; }
@@ -105,7 +107,7 @@
   .vrow .mini:hover { background:#2a3245; }
   .vrow .mini.on { background:#e8b33a; border-color:#e8b33a; color:#221900; }
 
-  /* ---- модалка RGBW-колеса ---- */
+  /* ---- РјРѕРґР°Р»РєР° RGBW-РєРѕР»РµСЃР° ---- */
   #rainbowModal { position:fixed; z-index:10001; display:none; }
   #rainbowModal.open { display:block; }
   .rmodal { background:#12151f; border:1px solid #2c3342; border-radius:10px; padding:12px; width:252px;
@@ -134,22 +136,22 @@
 
   <div id="panel">
     <div class="head" id="panelHead">
-      <div class="status" title="Соединение с Lumina"><span class="dot" id="dot"></span></div>
-      <div class="title">COB пульт</div>
-      <button class="btn round" id="infoBtn" title="Подсказка">i</button>
-      <button class="btn" id="collapseBtn">–</button>
+      <div class="status" title="РЎРѕРµРґРёРЅРµРЅРёРµ СЃ Lumina"><span class="dot" id="dot"></span></div>
+      <div class="title">COB РїСѓР»СЊС‚</div>
+      <button class="btn round" id="infoBtn" title="РџРѕРґСЃРєР°Р·РєР°">i</button>
+      <button class="btn" id="collapseBtn">вЂ“</button>
     </div>
     <div id="tip">
-      <b>Dimmer</b> — яркость. <b>ColorChanger</b>: 0-210 смена цветов (выше = быстрее),
-      211-255 голосовое (AUTO). <b>Strobe</b> — мерцание поверх.
-      Двойной клик по числу — ручной ввод (0-255). HTP: кто выше — тот главный.
+      <b>Dimmer</b> вЂ” СЏСЂРєРѕСЃС‚СЊ. <b>ColorChanger</b>: 0-210 СЃРјРµРЅР° С†РІРµС‚РѕРІ (РІС‹С€Рµ = Р±С‹СЃС‚СЂРµРµ),
+      211-255 РіРѕР»РѕСЃРѕРІРѕРµ (AUTO). <b>Strobe</b> вЂ” РјРµСЂС†Р°РЅРёРµ РїРѕРІРµСЂС….
+      Р”РІРѕР№РЅРѕР№ РєР»РёРє РїРѕ С‡РёСЃР»Сѓ вЂ” СЂСѓС‡РЅРѕР№ РІРІРѕРґ (0-255). HTP: РєС‚Рѕ РІС‹С€Рµ вЂ” С‚РѕС‚ РіР»Р°РІРЅС‹Р№.
     </div>
     <div class="body" id="panelBody">
       <div class="changer">
         <div class="top">
           <label>ColorChanger</label>
-          <span class="val" id="v206" title="Двойной клик — ввести значение (0-255)">0</span>
-          <button class="mini" id="autoBtn" data-ch="206" title="AUTO = голосовое управление (211+). Вкл/выкл только кнопкой.">AUTO</button>
+          <span class="val" id="v206" title="Р”РІРѕР№РЅРѕР№ РєР»РёРє вЂ” РІРІРµСЃС‚Рё Р·РЅР°С‡РµРЅРёРµ (0-255)">0</span>
+          <button class="mini" id="autoBtn" data-ch="206" title="AUTO = РіРѕР»РѕСЃРѕРІРѕРµ СѓРїСЂР°РІР»РµРЅРёРµ (211+). Р’РєР»/РІС‹РєР» С‚РѕР»СЊРєРѕ РєРЅРѕРїРєРѕР№.">AUTO</button>
         </div>
         <input type="range" id="ch206" min="0" max="255" value="0">
         <div class="scale">
@@ -163,11 +165,11 @@
       </div>
       <div class="cols">
         <div class="mainCol">
-          <div class="row gw"><label>W</label><input type="range" id="ch204" min="0" max="255" value="0"><span class="val" id="v204">0</span><button class="mini" data-ch="204" title="ВКЛ/ВЫКЛ">OFF</button></div>
-          <div class="row gr"><label>R</label><input type="range" id="ch201" min="0" max="255" value="0"><span class="val" id="v201">0</span><button class="mini" data-ch="201" title="ВКЛ/ВЫКЛ">OFF</button></div>
-          <div class="row gg"><label>G</label><input type="range" id="ch202" min="0" max="255" value="0"><span class="val" id="v202">0</span><button class="mini" data-ch="202" title="ВКЛ/ВЫКЛ">OFF</button></div>
-          <div class="row gb"><label>B</label><input type="range" id="ch203" min="0" max="255" value="0"><span class="val" id="v203">0</span><button class="mini" data-ch="203" title="ВКЛ/ВЫКЛ">OFF</button></div>
-          <div class="row" id="speedRow" style="display:none"><label>Ченджер</label><input type="range" id="ch207" min="0" max="255" value="0"><span class="val" id="v207">0</span><button class="mini" data-ch="207" title="ВКЛ/ВЫКЛ">OFF</button></div>
+          <div class="row gw"><label>W</label><input type="range" id="ch204" min="0" max="255" value="0"><span class="val" id="v204">0</span><button class="mini" data-ch="204" title="Р’РљР›/Р’Р«РљР›">OFF</button></div>
+          <div class="row gr"><label>R</label><input type="range" id="ch201" min="0" max="255" value="0"><span class="val" id="v201">0</span><button class="mini" data-ch="201" title="Р’РљР›/Р’Р«РљР›">OFF</button></div>
+          <div class="row gg"><label>G</label><input type="range" id="ch202" min="0" max="255" value="0"><span class="val" id="v202">0</span><button class="mini" data-ch="202" title="Р’РљР›/Р’Р«РљР›">OFF</button></div>
+          <div class="row gb"><label>B</label><input type="range" id="ch203" min="0" max="255" value="0"><span class="val" id="v203">0</span><button class="mini" data-ch="203" title="Р’РљР›/Р’Р«РљР›">OFF</button></div>
+          <div class="row" id="speedRow" style="display:none"><label>Р§РµРЅРґР¶РµСЂ</label><input type="range" id="ch207" min="0" max="255" value="0"><span class="val" id="v207">0</span><button class="mini" data-ch="207" title="Р’РљР›/Р’Р«РљР›">OFF</button></div>
           <div class="padRow">
             <div class="padsWrap">
               <div class="padsLabel">SCENE</div>
@@ -180,8 +182,8 @@
           </div>
         </div>
         <div class="masters">
-          <div class="vrow"><label>Dimmer</label><input type="range" class="vert" id="ch200" min="0" max="255" value="0"><span class="val" id="v200">0</span><button class="mini" data-ch="200" title="ВКЛ/ВЫКЛ">OFF</button></div>
-          <div class="vrow"><label>Strobe</label><input type="range" class="vert" id="ch205" min="0" max="255" value="0"><span class="val" id="v205">0</span><button class="mini" data-ch="205" title="ВКЛ/ВЫКЛ">OFF</button></div>
+          <div class="vrow"><label>Dimmer</label><input type="range" class="vert" id="ch200" min="0" max="255" value="0"><span class="val" id="v200">0</span><button class="mini" data-ch="200" title="Р’РљР›/Р’Р«РљР›">OFF</button></div>
+          <div class="vrow"><label>Strobe</label><input type="range" class="vert" id="ch205" min="0" max="255" value="0"><span class="val" id="v205">0</span><button class="mini" data-ch="205" title="Р’РљР›/Р’Р«РљР›">OFF</button></div>
         </div>
       </div>
     </div>
@@ -189,10 +191,10 @@
 
   <div id="rainbowModal" class="hidden">
     <div class="rmodal">
-      <div class="rm-head"><span>RGBW палитра</span>
+      <div class="rm-head"><span>RGBW РїР°Р»РёС‚СЂР°</span>
         <div class="hbtns">
-          <button class="hbtn" id="rmMin" title="Свернуть">–</button>
-          <button class="hbtn" id="rmClose" title="Закрыть">×</button>
+          <button class="hbtn" id="rmMin" title="РЎРІРµСЂРЅСѓС‚СЊ">вЂ“</button>
+          <button class="hbtn" id="rmClose" title="Р—Р°РєСЂС‹С‚СЊ">Г—</button>
         </div>
       </div>
       <canvas id="wheel" width="220" height="220"></canvas>
@@ -200,7 +202,7 @@
         <label>HEX</label>
         <div class="hexbox"><span class="hash">#</span><input id="hexInput" maxlength="6" spellcheck="false" autocomplete="off"></div>
       </div>
-      <div class="rm-note">Угол = цвет, от центра = яркость (Dimmer). Enter — применить HEX.</div>
+      <div class="rm-note">РЈРіРѕР» = С†РІРµС‚, РѕС‚ С†РµРЅС‚СЂР° = СЏСЂРєРѕСЃС‚СЊ (Dimmer). Enter вЂ” РїСЂРёРјРµРЅРёС‚СЊ HEX.</div>
     </div>
   </div>
 
@@ -211,7 +213,7 @@
   var auto206 = false, auto206Prev = 0;
   var dot = document.getElementById('dot');
 
-  // ---- сцены (пады, 12 шт) в сетке ----
+  // ---- СЃС†РµРЅС‹ (РїР°РґС‹, 12 С€С‚) РІ СЃРµС‚РєРµ ----
   (function () {
     var pads = document.getElementById('pads');
     for (var i = 1; i <= 12; i++) {
@@ -245,27 +247,27 @@
   function send_raw(s) { if (WS && WS.readyState === 1) WS.send(s); }
   function getVal(ch) { return parseInt(document.getElementById('ch' + ch).value, 10) || 0; }
 
-  // Диммер (200) = яркость: масштабирует цвета (201-204) и ченджер (206/207).
-  // Строб (205) - мерцание поверх, передаётся как есть (диммер его не гасит).
-  // Ченджер масштабируется диммером: диммер 0 -> ченджер 0 (режимы смены
-  // цветов выключаются вместе со светом). AUTO (206=211, голосовое
-  // управление) - только кнопкой: включается кликом, снимается кликом или
-  // движением фейдера. Даташит CH7: 0-50 A2, 51-90 A3, 91-130 A4,
-  // 131-210 A3/A4 (выше = быстрее), 211-255 Voice control.
+  // Р”РёРјРјРµСЂ (200) = СЏСЂРєРѕСЃС‚СЊ: РјР°СЃС€С‚Р°Р±РёСЂСѓРµС‚ С†РІРµС‚Р° (201-204) Рё С‡РµРЅРґР¶РµСЂ (206/207).
+  // РЎС‚СЂРѕР± (205) - РјРµСЂС†Р°РЅРёРµ РїРѕРІРµСЂС…, РїРµСЂРµРґР°С‘С‚СЃСЏ РєР°Рє РµСЃС‚СЊ (РґРёРјРјРµСЂ РµРіРѕ РЅРµ РіР°СЃРёС‚).
+  // Р§РµРЅРґР¶РµСЂ РјР°СЃС€С‚Р°Р±РёСЂСѓРµС‚СЃСЏ РґРёРјРјРµСЂРѕРј: РґРёРјРјРµСЂ 0 -> С‡РµРЅРґР¶РµСЂ 0 (СЂРµР¶РёРјС‹ СЃРјРµРЅС‹
+  // С†РІРµС‚РѕРІ РІС‹РєР»СЋС‡Р°СЋС‚СЃСЏ РІРјРµСЃС‚Рµ СЃРѕ СЃРІРµС‚РѕРј). AUTO (206=211, РіРѕР»РѕСЃРѕРІРѕРµ
+  // СѓРїСЂР°РІР»РµРЅРёРµ) - С‚РѕР»СЊРєРѕ РєРЅРѕРїРєРѕР№: РІРєР»СЋС‡Р°РµС‚СЃСЏ РєР»РёРєРѕРј, СЃРЅРёРјР°РµС‚СЃСЏ РєР»РёРєРѕРј РёР»Рё
+  // РґРІРёР¶РµРЅРёРµРј С„РµР№РґРµСЂР°. Р”Р°С‚Р°С€РёС‚ CH7: 0-50 A2, 51-90 A3, 91-130 A4,
+  // 131-210 A3/A4 (РІС‹С€Рµ = Р±С‹СЃС‚СЂРµРµ), 211-255 Voice control.
   function apply() {
     var dim = getVal(200) / 255;
     CH.forEach(function (ch) {
       var v;
-      if (blackout) v = 0;                                // BlackOut: всё в 0
-      else if (ch === 200) v = getVal(200);               // диммер
-      else if (ch === 205) v = getVal(ch);                // строб напрямую
-      else if (ch === 206 && auto206) v = 211;            // AUTO: голос
-      else v = Math.round(getVal(ch) * dim);              // цвета/ченджер диммером
+      if (blackout) v = 0;                                // BlackOut: РІСЃС‘ РІ 0
+      else if (ch === 200) v = getVal(200);               // РґРёРјРјРµСЂ
+      else if (ch === 205) v = getVal(ch);                // СЃС‚СЂРѕР± РЅР°РїСЂСЏРјСѓСЋ
+      else if (ch === 206 && auto206) v = 211;            // AUTO: РіРѕР»РѕСЃ
+      else v = Math.round(getVal(ch) * dim);              // С†РІРµС‚Р°/С‡РµРЅРґР¶РµСЂ РґРёРјРјРµСЂРѕРј
       send_raw(JSON.stringify({ ch: ch, val: v }));
     });
   }
 
-  // ручной ввод значения: двойной клик по числу -> поле (только цифры 0-255)
+  // СЂСѓС‡РЅРѕР№ РІРІРѕРґ Р·РЅР°С‡РµРЅРёСЏ: РґРІРѕР№РЅРѕР№ РєР»РёРє РїРѕ С‡РёСЃР»Сѓ -> РїРѕР»Рµ (С‚РѕР»СЊРєРѕ С†РёС„СЂС‹ 0-255)
   function makeEditable(ch) {
     var el = document.getElementById('ch' + ch);
     var num = document.getElementById('v' + ch);
@@ -303,7 +305,7 @@
   }
   CH.forEach(makeEditable);
 
-  // фейдеры -> Lumina + подпись значения
+  // С„РµР№РґРµСЂС‹ -> Lumina + РїРѕРґРїРёСЃСЊ Р·РЅР°С‡РµРЅРёСЏ
   CH.forEach(function (ch) {
     var el = document.getElementById('ch' + ch);
     var num = document.getElementById('v' + ch);
@@ -320,8 +322,8 @@
     });
   });
 
-  // BlackOut: гасит всё, повторный клик возвращает прежние значения.
-  // Горячие клавиши: Numpad0 (NUM-0) и Insert (если NUM выключен).
+  // BlackOut: РіР°СЃРёС‚ РІСЃС‘, РїРѕРІС‚РѕСЂРЅС‹Р№ РєР»РёРє РІРѕР·РІСЂР°С‰Р°РµС‚ РїСЂРµР¶РЅРёРµ Р·РЅР°С‡РµРЅРёСЏ.
+  // Р“РѕСЂСЏС‡РёРµ РєР»Р°РІРёС€Рё: Numpad0 (NUM-0) Рё Insert (РµСЃР»Рё NUM РІС‹РєР»СЋС‡РµРЅ).
   var blackout = false;
   function toggleBlackout() {
     blackout = !blackout;
@@ -331,17 +333,17 @@
   document.getElementById('blackoutBtn').onclick = function () { toggleBlackout(); };
   document.addEventListener('keydown', function (e) {
     var tag = (document.activeElement || {}).tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA') return;   // не мешаем ручному вводу
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;   // РЅРµ РјРµС€Р°РµРј СЂСѓС‡РЅРѕРјСѓ РІРІРѕРґСѓ
     if (e.code === 'Numpad0' || e.code === 'Insert' || e.key === 'Insert') {
       e.preventDefault();
       toggleBlackout();
     }
   });
 
-  // Свитч на каждый канал: 0 -> ON (255, строб 191=75%), повтор -> 0 (OFF).
-  // Ченджер (206) - отдельная механика AUTO: кнопка всегда подписана "AUTO",
-  // серая = режим выкл, жёлтая = вкл (микрофон прибора, физически 200).
-  // Включается ИСКЛЮЧИТЕЛЬНО кликом; фейдер снимает режим, кнопка - тоже.
+  // РЎРІРёС‚С‡ РЅР° РєР°Р¶РґС‹Р№ РєР°РЅР°Р»: 0 -> ON (255, СЃС‚СЂРѕР± 191=75%), РїРѕРІС‚РѕСЂ -> 0 (OFF).
+  // Р§РµРЅРґР¶РµСЂ (206) - РѕС‚РґРµР»СЊРЅР°СЏ РјРµС…Р°РЅРёРєР° AUTO: РєРЅРѕРїРєР° РІСЃРµРіРґР° РїРѕРґРїРёСЃР°РЅР° "AUTO",
+  // СЃРµСЂР°СЏ = СЂРµР¶РёРј РІС‹РєР», Р¶С‘Р»С‚Р°СЏ = РІРєР» (РјРёРєСЂРѕС„РѕРЅ РїСЂРёР±РѕСЂР°, С„РёР·РёС‡РµСЃРєРё 200).
+  // Р’РєР»СЋС‡Р°РµС‚СЃСЏ РРЎРљР›Р®Р§РРўР•Р›Р¬РќРћ РєР»РёРєРѕРј; С„РµР№РґРµСЂ СЃРЅРёРјР°РµС‚ СЂРµР¶РёРј, РєРЅРѕРїРєР° - С‚РѕР¶Рµ.
   Array.prototype.forEach.call(document.querySelectorAll('.mini[data-ch]'), function (btn) {
     btn.addEventListener('click', function () {
       var ch = parseInt(btn.getAttribute('data-ch'), 10);
@@ -350,8 +352,8 @@
         auto206 = !auto206;
         if (auto206) {
           auto206Prev = parseInt(el.value, 10) || 0;
-          el.value = 255;                       // визуально - макс фейдера
-          document.getElementById('v206').textContent = '211'; // физически - голос
+          el.value = 255;                       // РІРёР·СѓР°Р»СЊРЅРѕ - РјР°РєСЃ С„РµР№РґРµСЂР°
+          document.getElementById('v206').textContent = '211'; // С„РёР·РёС‡РµСЃРєРё - РіРѕР»РѕСЃ
           btn.classList.add('on');
         } else {
           el.value = auto206Prev;
@@ -371,15 +373,15 @@
     });
   });
 
-  // сворачивание
+  // СЃРІРѕСЂР°С‡РёРІР°РЅРёРµ
   document.getElementById('collapseBtn').onclick = function () {
     var b = document.getElementById('panelBody');
     var hidden = b.classList.toggle('hidden');
-    document.getElementById('collapseBtn').textContent = hidden ? '+' : '–';
+    document.getElementById('collapseBtn').textContent = hidden ? '+' : 'вЂ“';
     saveState();
   };
 
-  // всплывающая подсказка по [i]
+  // РІСЃРїР»С‹РІР°СЋС‰Р°СЏ РїРѕРґСЃРєР°Р·РєР° РїРѕ [i]
   (function () {
     var tip = document.getElementById('tip');
     var btn = document.getElementById('infoBtn');
@@ -391,7 +393,7 @@
     tip.addEventListener('click', function (e) { e.stopPropagation(); });
   })();
 
-  // перетаскивание
+  // РїРµСЂРµС‚Р°СЃРєРёРІР°РЅРёРµ
   (function () {
     var panel = document.getElementById('panel');
     var head = document.getElementById('panelHead');
@@ -434,7 +436,7 @@
     } catch (e) {}
   }
 
-  // ---- RGBW-колесо ----
+  // ---- RGBW-РєРѕР»РµСЃРѕ ----
   var wheelBase = null;
   function hsv2rgb(h, s, v) {
     var c = v * s, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = v - c, r, g, b;
@@ -459,7 +461,7 @@
     else hue = ((r - g) / d + 4) * 60;
     return hue;
   }
-  // обратная связь: маркер/HEX показывают текущее состояние фейдеров
+  // РѕР±СЂР°С‚РЅР°СЏ СЃРІСЏР·СЊ: РјР°СЂРєРµСЂ/HEX РїРѕРєР°Р·С‹РІР°СЋС‚ С‚РµРєСѓС‰РµРµ СЃРѕСЃС‚РѕСЏРЅРёРµ С„РµР№РґРµСЂРѕРІ
   function updateWheelMarker() {
     var r = getVal(201), g = getVal(202), b = getVal(203);
     var hue = hueOf(r, g, b);
@@ -480,7 +482,7 @@
         if (r > R) { d[i + 3] = 0; continue; }
         var hue = Math.atan2(dy, dx) * 180 / Math.PI;
         if (hue < 0) hue += 360;
-        var c = hsv2rgb(hue, 1, r / R);   // чёрный в центре, чистый цвет на краю
+        var c = hsv2rgb(hue, 1, r / R);   // С‡С‘СЂРЅС‹Р№ РІ С†РµРЅС‚СЂРµ, С‡РёСЃС‚С‹Р№ С†РІРµС‚ РЅР° РєСЂР°СЋ
         d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2]; d[i + 3] = 255;
       }
     }
@@ -523,7 +525,7 @@
   document.getElementById('rmClose').onclick = function () { modal.classList.remove('open'); };
   document.getElementById('rmMin').onclick = function () { rmodal.classList.toggle('min'); };
 
-  // перетаскивание окна за заголовок
+  // РїРµСЂРµС‚Р°СЃРєРёРІР°РЅРёРµ РѕРєРЅР° Р·Р° Р·Р°РіРѕР»РѕРІРѕРє
   (function () {
     var head = rmodal.querySelector('.rm-head'), dragging = false;
     head.addEventListener('mousedown', function (e) {
@@ -545,7 +547,7 @@
     document.addEventListener('mouseup', function () { dragging = false; });
   })();
 
-  // выбор цвета "без отрыва": зажал ЛКМ на колесе и водишь
+  // РІС‹Р±РѕСЂ С†РІРµС‚Р° "Р±РµР· РѕС‚СЂС‹РІР°": Р·Р°Р¶Р°Р» Р›РљРњ РЅР° РєРѕР»РµСЃРµ Рё РІРѕРґРёС€СЊ
   function pickColor(e) {
     var cv = document.getElementById('wheel');
     var rect = cv.getBoundingClientRect();
@@ -558,7 +560,7 @@
     var bright = r / R;
     var c = hsv2rgb(hue, 1, 1);
     setFader(201, c[0]); setFader(202, c[1]); setFader(203, c[2]); setFader(204, 0);
-    setFader(200, Math.round(bright * 255));           // диммер = светлота от центра
+    setFader(200, Math.round(bright * 255));           // РґРёРјРјРµСЂ = СЃРІРµС‚Р»РѕС‚Р° РѕС‚ С†РµРЅС‚СЂР°
     hexInput.value = rgb2hex(c[0], c[1], c[2]);
     drawMarker(hue, bright);
     apply();
@@ -579,12 +581,12 @@
     var mx = Math.max(r, g, b), mn = Math.min(r, g, b), hue = hueOf(r, g, b);
     if (mx === mn) { setFader(204, mx); setFader(201, 0); setFader(202, 0); setFader(203, 0); }
     else { setFader(204, 0); setFader(201, r); setFader(202, g); setFader(203, b); }
-    setFader(200, mx);                                    // диммер = светлота
+    setFader(200, mx);                                    // РґРёРјРјРµСЂ = СЃРІРµС‚Р»РѕС‚Р°
     apply();
     drawMarker(hue, mx / 255);
   });
 
-  // ---- сцены (пады, 12 шт) ----
+  // ---- СЃС†РµРЅС‹ (РїР°РґС‹, 12 С€С‚) ----
 
   loadState();
   connect();
@@ -593,3 +595,5 @@
 </script>
 </body>
 </html>
+
+
