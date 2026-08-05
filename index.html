@@ -100,6 +100,14 @@
   .padRow { display:flex; flex-direction:column; gap:4px; padding:8px; box-sizing:border-box;
     background:#171b24; border:1px solid #2c3342; border-radius:8px; }
   .padsLabel { color:#5c6476; font-size:9px; letter-spacing:1.5px; font-weight:700; text-align:center; }
+  .tplRow { display:flex; gap:4px; margin-bottom:2px; }
+  .tplRow select { flex:1; min-width:0; background:#0d1017; border:1px solid #3a4255; color:#cfd6e4;
+    border-radius:5px; font-size:10px; padding:2px 4px; outline:none; }
+  .tplRow select:focus { border-color:#4a9dff; }
+  .tplRow select option { background:#171b24; }
+  .tplRow button { background:#1d2330; border:1px solid #3a4255; color:#b8c0d0; border-radius:5px;
+    cursor:pointer; font-size:12px; font-weight:700; line-height:1; padding:2px 9px; }
+  .tplRow button:hover { background:#2a3245; }
   .pads { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; }
   .pad { aspect-ratio:1; background:#1d2330; border:1px solid #3a4255; border-radius:6px;
     color:#8b93a5; font-weight:700; font-size:13px; cursor:pointer; user-select:none; }
@@ -195,6 +203,10 @@
           <div class="row" id="speedRow" style="display:none"><label>Ченджер</label><input type="range" id="ch207" min="0" max="255" value="0"><span class="val" id="v207">0</span><button class="mini" data-ch="207" title="ВКЛ/ВЫКЛ">OFF</button></div>
           <div class="padRow">
             <div class="padsLabel">SCENE</div>
+            <div class="tplRow">
+              <select id="tplSelect" title="Шаблон сцен (общий для всех устройств)"></select>
+              <button id="tplAdd" title="Сохранить текущие сцены как новый шаблон">+</button>
+            </div>
             <div class="pads" id="pads"></div>
           </div>
         </div>
@@ -234,8 +246,15 @@
   // Запись сцены: удержание выбранного пада 2.4с -> пад мигает (готовность).
   // Выставляешь свет фейдерами/колесом, жмёшь тот же пад -> запись состояния
   // в сцену + быстрый флеш + сброс всех каналов в 0.
-  var scenes = {}, armedPad = null, holdTimer = null;
+  var scenes = {}, armedPad = null, holdTimer = null, renderPads = null;
   var HOLD_MS = 2400;
+  function saveScenes() { try { localStorage.setItem('cobScenes', JSON.stringify(scenes)); } catch (e) {} }
+  function loadScenes() {
+    try {
+      var s = JSON.parse(localStorage.getItem('cobScenes') || 'null');
+      if (s && typeof s === 'object') scenes = s;
+    } catch (e) {}
+  }
   (function () {
     var pads = document.getElementById('pads');
     function selectPad(b) {
@@ -283,7 +302,9 @@
       var snap = {};
       CH.forEach(function (ch) { snap[ch] = getVal(ch); });
       scenes[parseInt(b.textContent, 10)] = snap;
+      saveScenes();
       renderScene(b);
+      send_raw(JSON.stringify({ type: 'scene_set', idx: parseInt(b.textContent, 10), snap: snap }));
       b.classList.add('flash');
       setTimeout(function () { b.classList.remove('flash'); }, 650);
       disarmPad();
@@ -337,7 +358,43 @@
     [1, 2, 3, 4, rb, 6, 7, 8, 9, fb, 11, 12, 5, 10, bb].forEach(function (x) {
       pads.appendChild(typeof x === 'number' ? scenePad(x) : x);
     });
+    loadScenes();
+    renderPads = function () {
+      Array.prototype.forEach.call(pads.querySelectorAll('.pad.scene'), function (p) { renderScene(p); });
+    };
+    renderPads();
   })();
+
+  // ---- шаблоны сцен (общие для всех устройств, хранилище на сервере) ----
+  var tplSelect = document.getElementById('tplSelect');
+  var tplAdd = document.getElementById('tplAdd');
+  function fillTpl(payload) {
+    var names = Object.keys(payload.templates || {});
+    tplSelect.innerHTML = '';
+    if (!names.length) {
+      var o = document.createElement('option');
+      o.value = ''; o.textContent = '— без шаблона —';
+      tplSelect.appendChild(o);
+      tplSelect.value = '';
+      return;
+    }
+    names.forEach(function (n) {
+      var opt = document.createElement('option');
+      opt.value = n; opt.textContent = n;
+      tplSelect.appendChild(opt);
+    });
+    var cur = String(payload.active || names[0]);
+    tplSelect.value = names.indexOf(cur) >= 0 ? cur : names[0];
+  }
+  tplSelect.addEventListener('change', function () {
+    send_raw(JSON.stringify({ type: 'tpl_load', name: this.value }));
+  });
+  tplAdd.addEventListener('click', function () {
+    var name = window.prompt('Название шаблона (мероприятие / оператор):');
+    name = (name || '').trim();
+    if (!name) return;
+    send_raw(JSON.stringify({ type: 'tpl_save', name: name }));
+  });
 
   function host() { return location.hostname || '127.0.0.1'; }
   function connect() {
@@ -349,6 +406,14 @@
     };
     WS.onclose = function () { dot.className = 'dot'; WS = null; tryReconnect(); };
     WS.onerror = function () { dot.className = 'dot'; };
+    WS.onmessage = function (ev) {
+      try { var d = JSON.parse(ev.data); } catch (e) { return; }
+      if (!d || d.type !== 'scene_store' || !d.payload || !d.payload.templates) return;
+      var active = d.payload.active || '';
+      scenes = d.payload.templates[active] || {};
+      fillTpl(d.payload);
+      if (renderPads) renderPads();
+    };
   }
   function tryReconnect() {
     if (!wantOpen) return;
