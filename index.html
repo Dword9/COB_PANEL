@@ -182,7 +182,7 @@
         <div class="top">
           <label>ColorChanger</label>
           <span class="val" id="v206" title="Двойной клик — ввести значение (0-255)">0</span>
-          <button class="mini" id="autoBtn" data-ch="206" title="AUTO = голосовое управление (211+). Вкл/выкл только кнопкой.">AUTO</button>
+          <button class="mini" id="autoBtn" data-ch="206" title="ON/OFF: клик — 255 (максимум, Voice 211+), повторный — 0">OFF</button>
         </div>
         <input type="range" id="ch206" min="0" max="255" value="0">
         <div class="scale">
@@ -239,7 +239,6 @@
 (function () {
   var WS = null, wantOpen = true, retry = 0;
   var CH = [200,201,202,203,204,205,206,207];
-  var auto206 = false, auto206Prev = 0;
   var dot = document.getElementById('dot');
 
   // ---- сцены (пады) + спец-кнопки; порядок DOM = визуальные ряды сетки ----
@@ -265,7 +264,6 @@
       var snap = scenes[parseInt(b.textContent, 10)];
       if (!snap) return;
       CH.forEach(function (ch) { setFader(ch, Math.round(snap[ch]) || 0); });
-      auto206 = false;
       if (wheelBase) updateWheelMarker();
       apply();
     }
@@ -313,9 +311,8 @@
         var num = document.getElementById('v' + ch);
         var btn = document.querySelector('.mini[data-ch="' + ch + '"]');
         el.value = 0; num.textContent = 0;
-        if (btn) { btn.textContent = ch === 206 ? 'AUTO' : 'OFF'; btn.classList.remove('on'); }
+        if (btn) { btn.textContent = 'OFF'; btn.classList.remove('on'); }
       });
-      auto206 = false;
       if (wheelBase) updateWheelMarker();
       apply();
     }
@@ -408,11 +405,17 @@
     WS.onerror = function () { dot.className = 'dot'; };
     WS.onmessage = function (ev) {
       try { var d = JSON.parse(ev.data); } catch (e) { return; }
-      if (!d || d.type !== 'scene_store' || !d.payload || !d.payload.templates) return;
-      var active = d.payload.active || '';
-      scenes = d.payload.templates[active] || {};
-      fillTpl(d.payload);
-      if (renderPads) renderPads();
+      if (!d || !d.type) return;
+      if (d.type === 'scene_store' && d.payload && d.payload.templates) {
+        var active = d.payload.active || '';
+        scenes = d.payload.templates[active] || {};
+        fillTpl(d.payload);
+        if (renderPads) renderPads();
+      } else if (d.type === 'wing_input' && d.payload && d.payload.kind === 'fader') {
+        wingFaderTo(d.payload.id, d.payload.value);
+      } else if (d.type === 'wing_levels' && Array.isArray(d.payload)) {
+        d.payload.forEach(function (v, i) { wingFaderTo(i + 1, v); });
+      }
     };
   }
   function tryReconnect() {
@@ -423,13 +426,11 @@
   function send_raw(s) { if (WS && WS.readyState === 1) WS.send(s); }
   function getVal(ch) { return parseInt(document.getElementById('ch' + ch).value, 10) || 0; }
 
-  // Диммер (200) = яркость: масштабирует цвета (201-204) и ченджер (206/207).
+// Диммер (200) = яркость: масштабирует цвета (201-204) и ченджер (206/207).
   // Строб (205) - мерцание поверх, передаётся как есть (диммер его не гасит).
   // Ченджер масштабируется диммером: диммер 0 -> ченджер 0 (режимы смены
-  // цветов выключаются вместе со светом). AUTO (206=211, голосовое
-  // управление) - только кнопкой: включается кликом, снимается кликом или
-  // движением фейдера. Даташит CH7: 0-50 A2, 51-90 A3, 91-130 A4,
-  // 131-210 A3/A4 (выше = быстрее), 211-255 Voice control.
+  // цветов выключаются вместе со светом). Даташит CH7: 0-50 A2, 51-90 A3,
+  // 91-130 A4, 131-210 A3/A4 (выше = быстрее), 211-255 Voice control.
   function apply() {
     var dim = getVal(200) / 255;
     CH.forEach(function (ch) {
@@ -437,10 +438,32 @@
       if (blackout) v = 0;                                // BlackOut: всё в 0
       else if (ch === 200) v = getVal(200);               // диммер
       else if (ch === 205) v = getVal(ch);                // строб напрямую
-      else if (ch === 206 && auto206) v = 211;            // AUTO: голос
       else v = Math.round(getVal(ch) * dim);              // цвета/ченджер диммером
       send_raw(JSON.stringify({ ch: ch, val: v }));
     });
+  }
+
+  // Ручное изменение цвета (фейдеры RGBW / колесо / HEX) снимает приоритет
+  // ченджера: ch206 -> 0 (кнопка OFF), иначе режим прибора перебьёт цвет.
+  function cancelChanger() {
+    var el = document.getElementById('ch206');
+    var num = document.getElementById('v206');
+    var btn = document.querySelector('.mini[data-ch="206"]');
+    el.value = 0; num.textContent = '0';
+    if (btn) { btn.textContent = 'OFF'; btn.classList.remove('on'); }
+  }
+
+  // Обратная связь от крыла grandMA: фейдер N крыла -> канал COB.
+  // Схема: 1=R201, 2=G202, 3=B203, 4=W204, 5=диммер200, 6=строб205,
+  // 7=ченджер206, 8=— (не задействован). Движение ведёт слайдер панели + DMX.
+  var WING_MAP = { 1: 201, 2: 202, 3: 203, 4: 204, 5: 200, 6: 205, 7: 206, 8: 0 };
+  function wingFaderTo(id, value) {
+    var ch = WING_MAP[id];
+    if (!ch) return;
+    var v = Math.max(0, Math.min(255, Math.round(value)));
+    setFader(ch, v);
+    if (ch >= 201 && ch <= 204) cancelChanger();   // цвет с крыла снимает ченджер
+    apply();
   }
 
   // ручной ввод значения: двойной клик по числу -> поле (только цифры 0-255)
@@ -463,10 +486,10 @@
         num.textContent = v;
         el.value = v;
         if (btn) {
-          btn.textContent = ch === 206 ? 'AUTO' : (v > 0 ? 'ON' : 'OFF');
-          btn.classList.toggle('on', v > 0 && ch !== 206);
+          btn.textContent = v > 0 ? 'ON' : 'OFF';
+          btn.classList.toggle('on', v > 0);
         }
-        if (ch === 206 && auto206) { auto206 = false; btn.classList.remove('on'); }
+        if (ch >= 201 && ch <= 204) cancelChanger();   // ручной цвет отменяет ченджер
         apply();
       }
       function cancel() { if (!done) { done = true; num.textContent = parseInt(el.value, 10) || 0; } }
@@ -489,10 +512,10 @@
     el.addEventListener('input', function () {
       var v = parseInt(el.value, 10); num.textContent = v;
       if (btn) {
-        btn.textContent = ch === 206 ? 'AUTO' : (v > 0 ? 'ON' : 'OFF');
-        btn.classList.toggle('on', v > 0 && ch !== 206);
+        btn.textContent = v > 0 ? 'ON' : 'OFF';
+        btn.classList.toggle('on', v > 0);
       }
-      if (ch === 206 && auto206) { auto206 = false; btn.classList.remove('on'); }
+      if (ch >= 201 && ch <= 204) cancelChanger();   // ручной цвет отменяет ченджер
       if (wheelBase) updateWheelMarker();
       apply();
     });
@@ -522,29 +545,12 @@
     }
   });
 
-  // Свитч на каждый канал: 0 -> ON (255, строб 191=75%), повтор -> 0 (OFF).
-  // Ченджер (206) - отдельная механика AUTO: кнопка всегда подписана "AUTO",
-  // серая = режим выкл, жёлтая = вкл (микрофон прибора, физически 200).
-  // Включается ИСКЛЮЧИТЕЛЬНО кликом; фейдер снимает режим, кнопка - тоже.
+// Свитч на каждый канал: 0 -> ON (255, строб 191=75%), повтор -> 0 (OFF).
+  // Ченджер (206) — такая же кнопка ON/OFF (255/0), простой клик переключает.
   Array.prototype.forEach.call(document.querySelectorAll('.mini[data-ch]'), function (btn) {
     btn.addEventListener('click', function () {
       var ch = parseInt(btn.getAttribute('data-ch'), 10);
       var el = document.getElementById('ch' + ch);
-      if (ch === 206) {
-        auto206 = !auto206;
-        if (auto206) {
-          auto206Prev = parseInt(el.value, 10) || 0;
-          el.value = 255;                       // визуально - макс фейдера
-          document.getElementById('v206').textContent = '211'; // физически - голос
-          btn.classList.add('on');
-        } else {
-          el.value = auto206Prev;
-          document.getElementById('v206').textContent = auto206Prev;
-          btn.classList.remove('on');
-        }
-        apply();
-        return;
-      }
       var cur = parseInt(el.value, 10);
       var v = cur > 0 ? 0 : (ch === 205 ? 191 : 255);
       el.value = v;
@@ -689,7 +695,7 @@ function setFader(ch, v) {
     var num = document.getElementById('v' + ch);
     el.value = v; num.textContent = v;
     var btn = document.querySelector('.mini[data-ch="' + ch + '"]');
-    if (btn) { btn.textContent = ch === 206 ? 'AUTO' : (v > 0 ? 'ON' : 'OFF'); btn.classList.toggle('on', v > 0 && ch !== 206); }
+    if (btn) { btn.textContent = v > 0 ? 'ON' : 'OFF'; btn.classList.toggle('on', v > 0); }
   }
   var modal = document.getElementById('rainbowModal');
   var rmodal = modal.querySelector('.rmodal');
@@ -743,7 +749,8 @@ function setFader(ch, v) {
     var c = hsv2rgb(hue, 1, 1);
     setFader(201, c[0]); setFader(202, c[1]); setFader(203, c[2]); setFader(204, 0);
     setFader(200, Math.round(bright * 255));           // диммер = светлота от центра
-    hexInput.value = rgb2hex(c[0], c[1], c[2]);
+hexInput.value = rgb2hex(c[0], c[1], c[2]);
+    cancelChanger();
     drawMarker(hue, bright);
     apply();
   }
@@ -764,6 +771,7 @@ function setFader(ch, v) {
     if (mx === mn) { setFader(204, mx); setFader(201, 0); setFader(202, 0); setFader(203, 0); }
     else { setFader(204, 0); setFader(201, r); setFader(202, g); setFader(203, b); }
     setFader(200, mx);                                    // диммер = светлота
+    cancelChanger();
     apply();
     drawMarker(hue, mx / 255);
   });
