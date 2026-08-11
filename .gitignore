@@ -1,0 +1,39 @@
+# --- node / frontend ---
+node_modules/
+web/dist/
+web/release/
+web/*.log
+
+# --- python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+tools/wing/venv/
+
+# --- runtime data (библиотека медиа, не код) ---
+media/
+music 2 midi/web_ui_data/
+
+# --- локальные данные/проекты/логи/замеры ---
+logs/
+projects/
+routing_store.json
+scenes_store.json
+*.png
+tools/wing/tilt_calibration.json
+tools/wing/wing_calibrate_result.json
+tools/wing/wing_input_probe.log
+tools/wing/*.log
+tools/wing/wing_fw.bin
+
+# --- env / secrets ---
+.env
+.env.*
+
+# --- os / editor ---
+Thumbs.db
+.DS_Store
+*.swp
+.idea/
+.vscode/

@@ -1,0 +1,9 @@
+{
+  "name": "Lumina Control Center",
+  "description": "A professional DMX lighting controller interface designed to connect with Lumina Bridge for Art-Net integration, featuring AI-powered lighting presets.",
+  "requestFramePermissions": [
+    "display-capture",
+    "midi",
+    "midi-sysex"
+  ]
+}

@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lumina Visual — реактивная проекция</title>
+<style>
+  html,body{margin:0;padding:0;background:#000;overflow:hidden;height:100%}
+  canvas{display:block;width:100vw;height:100vh;background:#000}
+  /* HUD для отладки на проекторе (?hud=1): состояние шины */
+  #hud{position:fixed;left:8px;bottom:6px;font:11px/1.5 monospace;color:#3a3a3a;
+       white-space:pre;display:none;user-select:none;pointer-events:none}
+  #nows{position:fixed;right:10px;top:8px;font:11px monospace;color:#552;display:none}
+  /* VJ-текст (29.07, юзер: «слова динамично резко появляются, как в клубе
+     VJ делает»): строка в центре, слова ЖЁСТКО влетают по таймингам,
+     без плашки и «следующей строки», срез в конце строки без затухания. */
+  #kar{position:fixed;left:0;right:0;top:50%;transform:translateY(-50%);
+       text-align:center;pointer-events:none;padding:0 6vw;
+       font-family:'Segoe UI',system-ui,sans-serif;display:none}
+  #kar .cur{font-weight:900;text-transform:uppercase;font-size:7.5vh;line-height:1.15;
+       letter-spacing:.02em;color:#fff;
+       text-shadow:0 0 24px rgba(0,0,0,.95),0 0 90px rgba(0,0,0,.7)}
+  #kar .cur span{display:inline-block;white-space:pre;opacity:0;
+       transform:scale(1.9);filter:blur(3px);
+       transition:opacity .07s steps(2,end),
+                  transform .13s cubic-bezier(.2,1.8,.35,1),
+                  filter .13s linear}
+  #kar .cur span.on{opacity:1;transform:scale(1);filter:none}
+  #kar.pop .cur{animation:karIn .18s ease-out}
+  @keyframes karIn{0%{transform:scale(1.22);filter:brightness(2.4)}
+                   100%{transform:scale(1);filter:brightness(1)}}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="hud"></div>
+<div id="nows">нет связи с Lumina…</div>
+<div id="kar"><div class="cur" id="karCur"></div></div>
+<script>
+'use strict';
+/* Реактивная проекция (28.07, docs/track-director-architecture.md,
+ * слой projectors.visual): генеративные абстракции на дисплеи проекторов.
+ * Питается шиной visual_state по WS от Lumina (энергия/цвет/секция/удар).
+ * Чёрный фон — концепт «полной темноты» зала. Строб ограничен: вспышки
+ * только по ударам из анализа, реже 1 Гц, с затуханием ~0.5 с (дети).
+ * Отладка: ?scene=flow|smoke|bolt&energy=0.7&hue=0.6&sat=0.8&wash=0.5&flash=1
+ *          &hud=1 (текст состояния)
+ */
+
+const Q = new URLSearchParams(location.search);
+const qNum = (k) => Q.has(k) ? parseFloat(Q.get(k)) : null;
+const STATIC = ['scene','energy','hue'].some(k => Q.has(k));
+// Вывод на два проектора (28.07): side=L|R — своя сцена/энергия (duet),
+// mode=clone|mirror|duet|wide; mirror на левой стороне отражает кадр.
+const SIDE = (Q.get('side') || '').toUpperCase() === 'R' ? 'R' : 'L';
+const MODE = (Q.get('mode') || 'clone').toLowerCase();
+const MIRROR = MODE === 'mirror' && SIDE === 'L';
+
+// ---------- WebGL2 ----------
+const cv = document.getElementById('cv');
+const gl = cv.getContext('webgl2', { antialias: false, alpha: false, powerPreference: 'high-performance' });
+if (!gl) { document.body.innerHTML = '<div style="color:#666;font:14px monospace;padding:20px">WebGL2 недоступен</div>'; throw new Error('no webgl2'); }
+
+const VERT = `#version 300 es
+// Fullscreen triangle: (-1,-1),(3,-1),(-1,3) — покрывает ВЕСЬ экран
+// (ошибка 28.07: (-1,-1),(1,-1),(-1,1) давала половину и «диагональ»).
+void main(){
+  vec2 v = vec2(float((gl_VertexID & 1) << 2) - 1., float((gl_VertexID & 2) << 1) - 1.);
+  gl_Position = vec4(v, 0., 1.);
+}`;
+
+const FRAG = `#version 300 es
+precision highp float;
+uniform vec2 uRes;
+uniform float uT, uEnergy, uHue, uSat, uWash, uFlash, uFade, uBoltSeed, uFlipX;
+uniform float uSceneA, uSceneB, uMix; // кроссфейд A→B
+out vec4 O;
+
+float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453123); }
+float noise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  f = f*f*(3.-2.*f);
+  return mix(mix(hash(i), hash(i+vec2(1.,0.)), f.x),
+             mix(hash(i+vec2(0.,1.)), hash(i+vec2(1.,1.)), f.x), f.y);
+}
+float fbm(vec2 p){
+  float a = .5, r = 0.;
+  for(int i=0;i<5;i++){ r += a*noise(p); p = p*2.03 + vec2(11.7,5.3); a *= .5; }
+  return r;
+}
+vec3 hsl2rgb(vec3 c){
+  vec3 rgb = clamp(abs(mod(c.x*6.+vec3(0.,4.,2.),6.)-3.)-1., 0., 1.);
+  return c.z + c.y*(rgb-.5)*(1.-abs(2.*c.z-1.));
+}
+vec3 hueCol(float h, float s){ return hsl2rgb(vec3(fract(h+1.), clamp(s,0.,1.), .55)); }
+/* Двухцветная глубина: тени уходят в холодный фиолет, блики — в циан */
+vec3 depthCol(float h, float s, float lum){
+  vec3 shadow = hsl2rgb(vec3(fract(h-0.07+1.), clamp(s*1.05,0.,1.), .18));
+  vec3 lit    = hsl2rgb(vec3(fract(h+0.05+1.), clamp(s*.85,0.,1.), .60));
+  return mix(shadow, lit, clamp(lum,0.,1.));
+}
+
+/* 0 flow: медленные мраморные разводы (двойной domain warp) */
+vec3 sceneFlow(vec2 uv){
+  float t = uT*.05;
+  vec2 p = uv*1.9 + vec2(t, -t*.5);
+  vec2 w1 = vec2(fbm(p + t*.3), fbm(p - t*.24));
+  vec2 w2 = vec2(fbm(p + 2.2*w1 - t*.18), fbm(p - 2.0*w1 + t*.21));
+  float n = fbm(p + 1.8*w2);
+  float bands = .5 + .5*sin(uv.x*1.8 + w2.x*7. + n*5. + uT*.18);
+  float lum = (.12 + .88*n) * (.45 + .55*bands);
+  return depthCol(uHue, uSat, lum) * lum * 1.35;
+}
+
+/* 1 smoke: fbm-дым, турбулентность/плотность от энергии */
+vec3 sceneSmoke(vec2 uv){
+  float t = uT*(.06+.09*uEnergy);
+  vec2 p = uv*2.4;
+  vec2 w1 = vec2(fbm(p+vec2(t,0.)), fbm(p-vec2(0.,t*.8)));
+  float n = fbm(p + 1.6*w1);
+  float dens = smoothstep(.34,.86,n) * (.30+.70*uEnergy);
+  vec3 c = depthCol(uHue, uSat, dens*.9) * dens;
+  c += hueCol(uHue+.09, uSat*.65) * pow(dens, 3.)* .9;
+  return c;
+}
+
+/* 2 bolt: зигзаг-молния + вспышка в облаках по удару */
+vec3 sceneBolt(vec2 uv){
+  float segN = 12.;
+  float segy = clamp(floor((uv.y*.5+.5)*segN), 0., segN-1.);
+  float j1 = hash(vec2(segy,     uBoltSeed)) - .5;
+  float j2 = hash(vec2(segy+1.,  uBoltSeed)) - .5;
+  float fy = fract((uv.y*.5+.5)*segN);
+  float cx = (mix(j1, j2, fy) + (hash(vec2(segy, uBoltSeed+3.7))-.5)*.45*(1.-abs(fy*2.-1.))) * .85;
+  float d = abs(uv.x - cx);
+  float core = .0028/(d+.0028);
+  vec3 c = vec3(.75,.85,1.) * core * uFlash * .9;
+  c += hueCol(uHue+.55, .5) * core * core * .25 * uFlash;
+  c += hueCol(uHue, uSat*.6) * fbm(uv*2.8 + uT*.15) * uFlash * .8;
+  // между вспышками — тихое свечение облаков
+  c += depthCol(uHue, uSat, .35) * fbm(uv*2.2 + uT*.05) * .25;
+  return c;
+}
+
+/* 3 voronoi: органические ячейки, дышащие от энергии */
+vec3 sceneVoronoi(vec2 uv){
+  vec2 p = uv*(3. + 1.5*uEnergy);
+  vec2 ip = floor(p), fp = fract(p);
+  float f1 = 8., f2 = 8.;
+  for(int y=-1;y<=1;y++) for(int x=-1;x<=1;x++){
+    vec2 g = vec2(float(x), float(y));
+    vec2 o = vec2(hash(ip+g), hash(ip+g+7.31));
+    o = .5 + .42*sin(uT*(.35+.55*uEnergy) + 6.2831*o);
+    float d = length(g + o - fp);
+    if (d < f1) { f2 = f1; f1 = d; }
+    else if (d < f2) { f2 = d; }
+  }
+  float edge = smoothstep(.0, .08, f2 - f1);
+  float cell = 1. - smoothstep(.0, .55, f1);
+  vec3 c = depthCol(uHue + f1*.1, uSat, cell) * cell * (.35+.65*uEnergy);
+  c += hueCol(uHue+.5, uSat*.55) * (1.-edge) * .5; // швы светятся
+  return c;
+}
+
+/* 4 kaleido: калейдоскоп из дыма (8 сегментов) */
+vec3 sceneKaleido(vec2 uv){
+  float a = atan(uv.y, uv.x);
+  float r = length(uv);
+  float seg = 6.28318/8.;
+  a = mod(a, seg); a = abs(a - seg*.5);
+  vec2 p = vec2(cos(a), sin(a)) * r;
+  float t = uT*(.05+.06*uEnergy);
+  vec2 w = vec2(fbm(p*2.2 + t), fbm(p*2.2 - t*.7));
+  float n = fbm(p*2.6 + 1.2*w);
+  float lum = n * smoothstep(1.5, .15, r);
+  vec3 c = depthCol(uHue + n*.08, uSat, lum) * lum * 1.3;
+  c += hueCol(uHue+.5, uSat*.5) * pow(lum, 3.) * .7;
+  return c;
+}
+
+/* 5 rings: кольца от центра + ударная волна по флешу */
+vec3 sceneRings(vec2 uv){
+  float r = length(uv);
+  float t = uT*(.22+.5*uEnergy);
+  float w = sin((r - t)*12.566)*.5+.5;
+  w = pow(w, 5.) * smoothstep(1.6, .1, r);
+  vec3 c = depthCol(uHue + r*.05, uSat, w) * w * (.4+.6*uEnergy);
+  // ударная волна: яркое кольцо, разбегающееся от центра
+  float wave = smoothstep(.06, .0, abs(r - (1.-uFlash)*1.4));
+  c += hueCol(uHue+.5, .4) * wave * uFlash * 1.2;
+  return c;
+}
+
+/* 6 warp: звёздный туннель («Созвездие» — фирменная сцена площадки) */
+vec3 sceneWarp(vec2 uv){
+  float r = length(uv)+1e-3;
+  float a = atan(uv.y, uv.x);
+  vec2 p = vec2(a*1.91, .35/r + uT*(.5+1.1*uEnergy));
+  vec2 id = floor(p*6.);
+  vec2 gv = fract(p*6.) - .5;
+  float s = hash(id);
+  // точечные звёзды (не глыбы): яркие ядра внутри ячеек
+  float star = smoothstep(.80, .97, s) * smoothstep(.18, .03, length(gv)) * (.45/r);
+  vec3 c = hueCol(uHue + s*.2, uSat*.8) * star;
+  c += depthCol(uHue, uSat, .5) * pow(.35/r*.28, 2.) * .5; // свечение вдаль
+  c *= smoothstep(1.7, .25, r);
+  return c;
+}
+
+/* 7 balls: жидкий металл (метаболы) */
+vec3 sceneBalls(vec2 uv){
+  float f = 0.;
+  for(int i=0;i<5;i++){
+    float fi = float(i);
+    vec2 c = vec2(sin(uT*(.28+.06*fi)+fi*2.1)*.85, cos(uT*(.21+.08*fi)+fi*1.7)*.6);
+    f += .11/(.015 + dot(uv-c, uv-c)*7.);
+  }
+  float m = smoothstep(.9, 1.9, f);
+  vec3 c = depthCol(uHue, uSat, m) * m * (.3+.7*uEnergy);
+  c += hueCol(uHue+.5, uSat*.5) * smoothstep(1.8, 2.8, f) * .7; // блик металла
+  return c;
+}
+
+/* 8 contrast: БЕЛЫЙ резкий кадр + чёрная резкая геометрия на сильную долю
+ * (запрос юзера 28.07). Между вспышками — едва видимая сетка. */
+vec3 sceneContrast(vec2 uv){
+  vec2 g = abs(fract(uv*6.)-.5);
+  float grid = smoothstep(.46, .5, max(g.x, g.y)) * .12;
+  vec3 c = depthCol(uHue, uSat, .3) * (grid + .04);
+  if (uFlash > .002) {
+    float mode = floor(hash(vec2(uBoltSeed, 1.3))*3. + .001);
+    float shape;
+    if (mode < .5)      shape = step(.5, fract(length(uv)*5. + .25));   // кольца
+    else if (mode < 1.5) shape = step(.5, fract((uv.x+uv.y)*4.));        // диагонали
+    else                 shape = step(.5, fract(uv.y*7.));               // полосы
+    vec3 fcol = mix(vec3(1.), vec3(0.), shape);
+    c = mix(c, fcol, clamp(uFlash, 0., 1.));
+  }
+  return c;
+}
+
+vec3 sceneById(int id, vec2 uv){
+  if (id == 0) return sceneFlow(uv);
+  if (id == 1) return sceneSmoke(uv);
+  if (id == 2) return sceneBolt(uv);
+  if (id == 3) return sceneVoronoi(uv);
+  if (id == 4) return sceneKaleido(uv);
+  if (id == 5) return sceneRings(uv);
+  if (id == 6) return sceneWarp(uv);
+  if (id == 7) return sceneBalls(uv);
+  return sceneContrast(uv);
+}
+
+void main(){
+  vec2 uv = (gl_FragCoord.xy*2. - uRes)/min(uRes.x, uRes.y);
+  if (uFlipX > .5) uv.x = -uv.x; // зеркало левого проектора (mode=mirror)
+  vec3 col = mix(sceneById(int(uSceneA+.5), uv), sceneById(int(uSceneB+.5), uv), clamp(uMix, 0., 1.));
+  col *= (.38 + .62*uEnergy);
+  col += hueCol(uHue, uSat) * uWash * .07;
+  // Мягкая виньетка: контент растворяется в темноте зала, без резких срезов
+  float vig = smoothstep(1.85, 0.9, length(uv*vec2(.82,1.)));
+  col *= .25 + .75*vig;
+  col = max(col, 0.) * uFade;
+  // Дизеринг: без него градиенты полосят на проекторе в тёмном зале
+  col += (hash(gl_FragCoord.xy) - .5) * (1.8/255.);
+  O = vec4(col, 1.);
+}`;
+
+function compile(type, src){
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(gl.VERTEX_SHADER, VERT));
+gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FRAG));
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+gl.useProgram(prog);
+const U = {};
+for (const n of ['uRes','uT','uEnergy','uHue','uSat','uWash','uFlash','uFade','uBoltSeed','uFlipX','uSceneA','uSceneB','uMix']) U[n] = gl.getUniformLocation(prog, n);
+gl.bindVertexArray(gl.createVertexArray());
+
+// ---------- Сцены и выбор по секциям ----------
+// Пул на секцию профиля: вариант чередуется по индексу секции (secIdx),
+// поэтому соседние припевы выглядят по-разному, но повтор трека
+// детерминирован (та же секция → та же сцена).
+const SCENE_IDS = { flow: 0, smoke: 1, bolt: 2, voronoi: 3, kaleido: 4, rings: 5, warp: 6, balls: 7, contrast: 8 };
+const SCENE_NAMES = ['flow','smoke','bolt','voronoi','kaleido','rings','warp','balls','contrast'];
+const SECTION_SCENES = {
+  quiet:   ['flow', 'warp'],
+  sustain: ['flow', 'balls'],
+  groove:  ['smoke', 'voronoi'],
+  peak:    ['bolt', 'contrast', 'rings'],
+  dense:   ['kaleido', 'smoke'],
+};
+const tgt = {
+  playing: 0, energy: 0, hue: 0, sat: 0.95, wash: 0,
+  sceneId: 0, flash: 0, fade: 0,
+};
+const cur = { energy: 0, hue: 0, sat: 0.95, wash: 0, flash: 0, fade: 0,
+  sceneA: 0, sceneB: 0, mix: 1 };
+let boltSeed = 1;
+
+// Статик-режим для скриншотов/отладки: параметры из query, без WS
+const staticFlash = qNum('flash');
+if (STATIC) {
+  const sc = Q.get('scene');
+  if (sc && SCENE_IDS[sc] !== undefined) { tgt.sceneId = SCENE_IDS[sc]; cur.sceneA = cur.sceneB = tgt.sceneId; cur.mix = 1; }
+  if (qNum('energy') !== null) tgt.energy = qNum('energy');
+  if (qNum('hue') !== null) tgt.hue = qNum('hue');
+  if (qNum('sat') !== null) tgt.sat = qNum('sat');
+  if (qNum('wash') !== null) tgt.wash = qNum('wash');
+  tgt.playing = 1; tgt.fade = 1;
+  if (staticFlash !== null) cur.flash = staticFlash;
+  cur.energy = tgt.energy; cur.hue = tgt.hue; cur.sat = tgt.sat; cur.wash = tgt.wash;
+  cur.fade = 1;
+}
+
+// ---------- WS: шина visual_state от Lumina ----------
+const nowsEl = document.getElementById('nows');
+let ws = null, wsOk = false;
+function connect(){
+  if (STATIC) return;
+  try { ws = new WebSocket(`ws://${location.host}/ws`); } catch { return setTimeout(connect, 3000); }
+  ws.onopen = () => { wsOk = true; nowsEl.style.display = 'none'; };
+  ws.onclose = () => { wsOk = false; nowsEl.style.display = 'block'; setTimeout(connect, 3000); };
+  ws.onerror = () => { try { ws.close(); } catch {} };
+  ws.onmessage = (ev) => {
+    let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+    if (!msg || msg.type !== 'visual_state' || !msg.payload) return;
+    const p = msg.payload;
+    tgt.playing = p.playing ? 1 : 0;
+    tgt.hue = ((p.hue ?? 0) % 1 + 1) % 1;
+    tgt.sat = Math.max(0, Math.min(1, p.sat ?? 0.95));
+    tgt.wash = Math.max(0, Math.min(1, p.wash ?? 0));
+    // Караоке: время трека для интерполяции между сообщениями
+    if (typeof p.t === 'number') { lastMsgT = p.t; lastMsgAt = performance.now(); }
+    if (typeof p.lyricsUrl === 'string') setLyrics(p.lyricsUrl);
+    else if (p.lyricsUrl === null) setLyrics(null);
+    const pool = SECTION_SCENES[p.section] || SECTION_SCENES.quiet;
+    // Дуэт: правая сторона берёт СЛЕДУЮЩИЙ вариант пула (детерминированно)
+    const sideOff = (MODE === 'duet' && SIDE === 'R') ? 1 : 0;
+    const name = pool[((p.secIdx ?? 0) + sideOff) % pool.length];
+    const id = SCENE_IDS[name];
+    if (id !== undefined && id !== tgt.sceneId) tgt.sceneId = id;
+    // Дуэт: энергия стороны от своей половины рига (левые/правые лучи)
+    const eKey = MODE === 'duet' ? (SIDE === 'L' ? 'energyL' : 'energyR') : 'energy';
+    tgt.energy = Math.max(0, Math.min(1, p[eKey] ?? p.energy ?? 0));
+    if (p.hit && tgt.playing) {
+      // Вспышка по удару; сида молнии/геометрии меняем, чтобы каждая была новой
+      tgt.flash = 1;
+      boltSeed = (boltSeed * 16807) % 2147483647;
+    }
+  };
+}
+connect();
+
+// ---------- VJ-текст: слова резко влетают по таймингам (29.07) ----------
+// lyricsUrl приходит в каждом visual_state; файл тянем один раз, дальше
+// чистая функция времени: текущая строка + слова по таймингам. Отличие от
+// караоке 28.07: нет «загорания» и следующей строки — жёсткий вход строки
+// (pop-анимация), слова щёлкаются по одному, срез в конце строки.
+const karEl = document.getElementById('kar');
+const karCur = document.getElementById('karCur');
+let lyrics = null;       // {lines:[{t0,t1,text,words:[{t0,t1,w}]}]}
+let lyricsUrl = null;
+let lastMsgT = 0, lastMsgAt = 0;
+let karLineIdx = -1, karWordCount = -1;
+
+async function setLyrics(url) {
+  if (url === lyricsUrl) return;
+  lyricsUrl = url;
+  lyrics = null;
+  karLineIdx = -1;
+  karEl.style.display = 'none';
+  if (!url) return;
+  try {
+    const r = await fetch(url);
+    const j = await r.json();
+    if (Array.isArray(j.lines) && j.lines.length > 0) lyrics = j;
+  } catch { /* текста нет/битый — просто не показываем */ }
+}
+
+const tNow = () => lastMsgT + (tgt.playing ? (performance.now() - lastMsgAt) / 1000 : 0);
+
+function karHide() {
+  if (karLineIdx !== -1) { karLineIdx = -1; karEl.style.display = 'none'; }
+}
+
+function renderKaraoke() {
+  if (!lyrics || !tgt.playing || STATIC_HIDE_KAR) { karHide(); return; }
+  const t = tNow();
+  const lines = lyrics.lines;
+  // Текущая строка: вход почти без опережения, срез с малой милостью
+  let idx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (t >= lines[i].t0 - 0.08 && t <= lines[i].t1 + 0.25) { idx = i; break; }
+  }
+  if (idx === -1) { karHide(); return; }
+  if (idx !== karLineIdx) {
+    karLineIdx = idx;
+    const ln = lines[idx];
+    // Слова-спаны (влетают по одному); если таймингов слов нет — вся строка
+    karCur.innerHTML = ln.words && ln.words.length
+      ? ln.words.map(w => `<span>${escapeHtml(w.w)}</span>`).join('')
+      : `<span class="on">${escapeHtml(ln.text)}</span>`;
+    karWordCount = -1;
+    karEl.style.display = 'block';
+    // Перезапуск pop-анимации строки
+    karEl.classList.remove('pop');
+    void karEl.offsetWidth;
+    karEl.classList.add('pop');
+  }
+  // Влетаем словами по таймингу (щёлчком, не плавным загоранием)
+  const words = lines[idx].words || [];
+  let on = 0;
+  for (let i = 0; i < words.length; i++) if (t >= words[i].t0 - 0.04) on = i + 1;
+  if (on !== karWordCount) {
+    karWordCount = on;
+    const spans = karCur.children;
+    for (let i = 0; i < spans.length; i++) spans[i].classList.toggle('on', i < on);
+  }
+  // Удар из анализа — вся строка вспыхивает ярче (реактивность VJ-текста)
+  karEl.style.filter = `brightness(${(1 + (cur.flash || 0) * 0.9).toFixed(3)})`;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// Отладка караоке без WS: ?lyrics=<url>&lyrt=25&t=1 (время фиксировано)
+const STATIC_HIDE_KAR = Q.has('nolyrics');
+if (Q.has('lyrics')) {
+  setLyrics(Q.get('lyrics'));
+  if (qNum('lyrt') !== null) { lastMsgT = qNum('lyrt'); lastMsgAt = performance.now(); }
+}
+
+// ---------- Рендер-цикл: плавные переходы состояния ----------
+const hud = document.getElementById('hud');
+if (Q.get('hud')) hud.style.display = 'block';
+let prevT = performance.now();
+function lerpExp(a, b, rate, dt){ return a + (b - a) * Math.min(1, rate * dt); }
+
+function frame(now){
+  const dt = Math.min(0.1, (now - prevT) / 1000);
+  prevT = now;
+  // Энергия: быстрая атака, медленный спад (живость без дёргания)
+  cur.energy = lerpExp(cur.energy, tgt.energy, tgt.energy > cur.energy ? 6 : 1.6, dt);
+  cur.hue = lerpExp(cur.hue, tgt.hue, 4, dt);
+  cur.sat = lerpExp(cur.sat, tgt.sat, 4, dt);
+  cur.wash = lerpExp(cur.wash, tgt.wash, 3, dt);
+  // Смена сцены: заводим B и тянем кроссфейд A→B ~0.6с, потом A=B
+  if (cur.sceneB !== tgt.sceneId) { cur.sceneB = tgt.sceneId; cur.mix = 0; }
+  cur.mix = lerpExp(cur.mix, 1, 1.8, dt);
+  if (cur.mix > 0.995 && cur.sceneA !== cur.sceneB) { cur.sceneA = cur.sceneB; cur.mix = 0; }
+  // Вспышка: затухание ~0.5 с; fade: ввод 1.5 с / гашение 2 с (темнота!)
+  cur.flash = Math.max(0, cur.flash - dt * 2.2 + (tgt.flash > 0 ? tgt.flash : 0));
+  tgt.flash = 0;
+  if (cur.flash > 1) cur.flash = 1;
+  // Статик-режим: flash держим на заданном значении (иначе затухнет до кадра)
+  if (STATIC && staticFlash !== null) cur.flash = staticFlash;
+  cur.fade = lerpExp(cur.fade, tgt.playing ? 1 : 0, tgt.playing ? 0.7 : 0.5, dt);
+
+  const w = cv.clientWidth * Math.min(2, window.devicePixelRatio || 1);
+  const h = cv.clientHeight * Math.min(2, window.devicePixelRatio || 1);
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; gl.viewport(0, 0, w, h); }
+  gl.uniform2f(U.uRes, w, h);
+  gl.uniform1f(U.uT, now / 1000);
+  gl.uniform1f(U.uEnergy, cur.energy);
+  gl.uniform1f(U.uHue, cur.hue);
+  gl.uniform1f(U.uSat, cur.sat);
+  gl.uniform1f(U.uWash, cur.wash);
+  gl.uniform1f(U.uFlash, cur.flash);
+  gl.uniform1f(U.uFade, cur.fade);
+  gl.uniform1f(U.uBoltSeed, boltSeed % 997);
+  gl.uniform1f(U.uFlipX, MIRROR ? 1 : 0);
+  gl.uniform1f(U.uSceneA, cur.sceneA);
+  gl.uniform1f(U.uSceneB, cur.sceneB);
+  gl.uniform1f(U.uMix, cur.mix);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  renderKaraoke();
+  if (hud.style.display !== 'none') {
+    const shown = cur.mix < 0.5 ? cur.sceneA : cur.sceneB;
+    hud.textContent = `E ${cur.energy.toFixed(2)}  hue ${cur.hue.toFixed(2)}  sat ${cur.sat.toFixed(2)}  wash ${cur.wash.toFixed(2)}\n` +
+      `scene ${SCENE_NAMES[shown]}${cur.mix < 0.99 ? ' → ' + SCENE_NAMES[cur.sceneB] : ''}  flash ${cur.flash.toFixed(2)}  fade ${cur.fade.toFixed(2)}  ws ${wsOk ? 'ok' : '—'}  ${SIDE}/${MODE}`;
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

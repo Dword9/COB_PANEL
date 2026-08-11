@@ -1,0 +1,5 @@
+{
+  "_comment": "VU-indicator on wing backlight. Bar mode: one common level (max of low/mid/high bands) fills left to right on executor buttons 1-6 (words 98-103, mapped via wing_led_button_map.py). Brightness: 0..2047 (11-bit PWM). Layout: 42-45 = executor buttons row 1, 50-53 = row 2, 57-61 = row 3, 64,66-70 = numeric pad + special, 98-105 = executor VU buttons 1-8, 112 = special button.",
+  "max_value": 2047,
+  "bar": {"label": "executor buttons 1-6, left to right", "source": "max", "words": [98, 99, 100, 101, 102, 103]}
+}

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Lumina — запуск</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #07070c;
+    color: #cfd2dc;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+    overflow: hidden;
+  }
+  .wrap { text-align: center; max-width: 420px; padding: 24px; }
+  .logo {
+    font-size: 42px;
+    font-weight: 800;
+    letter-spacing: 12px;
+    color: #e8e9ef;
+    text-shadow: 0 0 24px rgba(120, 140, 255, .45), 0 0 64px rgba(120, 140, 255, .25);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .55; }
+  }
+  .sub { margin-top: 6px; font-size: 12px; letter-spacing: 4px; color: #565b6e; text-transform: uppercase; }
+  .status { margin-top: 36px; font-size: 14px; color: #9aa0b4; min-height: 20px; }
+  .hint { margin-top: 8px; font-size: 12px; color: #565b6e; }
+  .spinner {
+    width: 28px; height: 28px;
+    margin: 22px auto 0;
+    border: 3px solid #23263a;
+    border-top-color: #7888ff;
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .buttons { margin-top: 30px; display: flex; gap: 10px; justify-content: center; }
+  button {
+    background: #16182a;
+    color: #cfd2dc;
+    border: 1px solid #2c3050;
+    border-radius: 8px;
+    padding: 9px 16px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  button:hover { background: #1e2138; border-color: #4550a0; }
+  button.primary { background: #2c37a0; border-color: #4550d0; color: #fff; }
+  button.primary:hover { background: #3743bd; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="logo">LUMINA</div>
+    <div class="sub">Control Center</div>
+    <div class="spinner" id="spinner"></div>
+    <div class="status" id="status">Подключаюсь к серверу…</div>
+    <div class="hint" id="hint">Сервер Lumina (server_v4) не отвечает на localhost:8000</div>
+    <div class="buttons">
+      <button id="btn-start" class="primary">Запустить сервер</button>
+      <button id="btn-retry">Повторить</button>
+      <button id="btn-browser">Открыть в браузере</button>
+    </div>
+  </div>
+
+<script>
+  const api = window.luminaDesktop;
+  const statusEl = document.getElementById('status');
+  const hintEl = document.getElementById('hint');
+  const spinnerEl = document.getElementById('spinner');
+  let backendUrl = 'http://localhost:8000/';
+  let starting = false;
+
+  api.backendUrl().then((u) => { backendUrl = u; });
+
+  async function check() {
+    const up = await api.pingBackend();
+    if (up) {
+      statusEl.textContent = 'Сервер найден, загружаю интерфейс…';
+      window.location.href = backendUrl;
+      return true;
+    }
+    if (!starting) statusEl.textContent = 'Жду сервер… (автоповтор каждые 3 сек)';
+    return false;
+  }
+
+  document.getElementById('btn-retry').addEventListener('click', async () => {
+    statusEl.textContent = 'Проверяю…';
+    if (!(await check())) statusEl.textContent = 'Сервер всё ещё недоступен';
+  });
+
+  document.getElementById('btn-start').addEventListener('click', async () => {
+    starting = true;
+    statusEl.textContent = 'Запускаю задачу LuminaDMX…';
+    const res = await api.startBackend();
+    if (res.ok) {
+      statusEl.textContent = 'Сервер запускается, подождите 5–10 сек…';
+      hintEl.textContent = 'Задача LuminaDMX запущена через Планировщик заданий';
+    } else {
+      starting = false;
+      statusEl.textContent = 'Не удалось запустить задачу';
+      hintEl.textContent = res.error || 'Проверьте, что задача LuminaDMX существует в Планировщике';
+    }
+  });
+
+  document.getElementById('btn-browser').addEventListener('click', () => {
+    api.openExternal(backendUrl);
+  });
+
+  check();
+  setInterval(check, 3000);
+</script>
+</body>
+</html>

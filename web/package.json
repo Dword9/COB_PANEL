@@ -1,0 +1,61 @@
+{
+  "name": "lumina-control-center",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Lumina DMX Control Center — desktop shell",
+  "author": "Lumina",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "tsc --noEmit",
+    "electron": "electron .",
+    "electron:dev": "node electron/dev.cjs",
+    "dist": "electron-builder",
+    "dist:dir": "electron-builder --dir"
+  },
+  "build": {
+    "appId": "com.lumina.dmx",
+    "productName": "Lumina Control Center",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "artifactName": "Lumina-${version}-${os}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Lumina"
+    },
+    "portable": {
+      "artifactName": "Lumina-${version}-portable.${ext}"
+    }
+  },
+  "dependencies": {
+    "@xyflow/react": "12.4.2",
+    "lucide-react": "^0.576.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.0.0",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
+  }
+}
