@@ -110,10 +110,11 @@ class WingInputMapper:
 
     def _emit(self, universe, channel, value):
         value = max(0, min(255, int(value)))
+        buf = self._dmx.get(universe)
+        if buf is not None:
+            buf[channel - 1] = value
         if self._write_dmx is not None:
             self._write_dmx(channel - 1, value)
-        else:
-            self._dmx[universe][channel - 1] = value
 
     # ---------- config ----------
     def _load_map(self):
@@ -137,6 +138,21 @@ class WingInputMapper:
         self._last_enc_raw = [None] * 4
         self._enc_value = [0, 0, 0, 0]
         logger.info("Карта роутинга крыла заменена на лету")
+
+    def get_fader_levels(self) -> list:
+        """Уровни физических фейдеров 1..8 по АКТИВНОЙ карте (для снапшота
+        wing_levels): пустые фейдеры / вне диапазона -> 0."""
+        out = []
+        cfg = self._map.get("faders", [])
+        for idx in range(8):
+            a = cfg[idx] if idx < len(cfg) else {}
+            ch = a.get("channel")
+            if not isinstance(ch, int) or not 1 <= ch <= 512:
+                out.append(0)
+            else:
+                buf = self._dmx.get(a.get("universe", 1))
+                out.append(buf[ch - 1] if buf else 0)
+        return out
 
     # ---------- DMX buffer access (for WingSender) ----------
     def get_frame(self, universe: int) -> bytes:

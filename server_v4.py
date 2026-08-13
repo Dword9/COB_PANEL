@@ -144,6 +144,9 @@ class WingSender:
         self.event_cb = None
         self._wave_running = False
         self._led_map = None
+        # Серверный blackout (14.08): клиент/крыло шлют {type:'blackout'},
+        # пока флаг поднят — в DMX уходит нулевой кадр, поверх HTP-микса.
+        self._blackout = False
 
     # ---------- LED: волна и эквалайзер ----------
     def _maybe_wave(self):
@@ -234,6 +237,61 @@ class WingSender:
             except Exception:
                 pass
 
+    # ---------- Волна на физическом крыле (14.08) ----------
+    def _load_btn_word_map(self):
+        """Обратная карта кнопка -> LED-слово (из wing_led_button_map.json)."""
+        try:
+            with open(os.path.join(WING_DIR, "wing_led_button_map.json"), "r", encoding="utf-8") as f:
+                data = json.load(f)
+            rev = {}
+            for w, b in data.items():
+                rev[int(b)] = int(w)
+            self._btn_word = rev
+        except Exception:
+            self._btn_word = {}
+
+    def wing_wave(self, events):
+        """Вспышки LED на крыле по задержкам от панели: events = [[btn_id, delay_ms], ...].
+
+        Старую волну обрываем, текущий LED-буфер запоминаем и восстанавливаем.
+        """
+        if self._wing is None:
+            return
+        if not hasattr(self, "_btn_word"):
+            self._btn_word = {}
+        if not self._btn_word:
+            self._load_btn_word_map()
+        ev = [(int(a), int(b)) for a, b in events if a is not None]
+        if not ev:
+            return
+        if not hasattr(self, "_wave_cancel"):
+            self._wave_cancel = threading.Event()
+        self._wave_cancel.set()
+        cancel = threading.Event()
+        self._wave_cancel = cancel
+
+        def run():
+            try:
+                with self._wing._led_lock:
+                    restore = bytes(self._wing.led_body)
+                t0 = time.time()
+                for btn_id, delay in sorted(ev, key=lambda x: x[1]):
+                    if cancel.is_set() or self._stop.is_set():
+                        return
+                    dt = delay / 1000.0 - (time.time() - t0)
+                    if dt > 0:
+                        time.sleep(dt)
+                    word = self._btn_word.get(btn_id)
+                    if word is not None:
+                        self._wing.set_led(word, 2047)
+                time.sleep(0.7)
+                if not cancel.is_set() and self._wing is not None:
+                    self._wing.set_led_frame(restore)
+            except Exception:
+                pass
+
+        threading.Thread(target=run, daemon=True, name="wing-wave-btn").start()
+
     def start(self) -> bool:
         if not WING_AVAILABLE:
             logging.warning("pyusb/libusb не установлены — крыло недоступно")
@@ -291,6 +349,8 @@ class WingSender:
                     self._maybe_wave()
                 with self._lock:
                     frame = bytes(self.dmx_data)
+                    if self._blackout:
+                        frame = bytes(len(frame))
                 self._wing.send_dmx(frame, frame)
             except Exception as e:
                 logging.error("Ошибка записи в крыло: %s — переподключение...", e)
@@ -349,6 +409,11 @@ class WingSender:
                 self._sources[source] = bytearray(self.dmx_len)
                 for ch in range(self.dmx_len):
                     self._remix_channel(ch)
+
+    def set_blackout(self, on: bool) -> None:
+        """Глобальный blackout (14.08): нулевой кадр в крыло, пока включён."""
+        with self._lock:
+            self._blackout = bool(on)
 
     def apply_routing(self, routing_map: dict) -> None:
         """Живо применить пресет роутинга крыла (фейдеры/энкодеры/кнопки).
@@ -1469,8 +1534,14 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
     # подключение, дальше — дельта-события wing_input.
     if isinstance(sender, WingSender):
         with sender._lock:
-            buf = sender._sources.get(LOCAL_SOURCE, bytearray(512))
-            wing_lv = list(buf[0:8])
+            # Снапшот физических фейдеров по АКТИВНОЙ карте (13.08): карта
+            # теперь шлёт фейдеры в каналы COB-раскладки 200-205/201-204, а не 1-8
+            mapper = getattr(sender, "_mapper", None)
+            if mapper is not None:
+                wing_lv = mapper.get_fader_levels()
+            else:
+                buf = sender._sources.get(LOCAL_SOURCE, bytearray(512))
+                wing_lv = list(buf[0:8])
         await ws.send_str(json.dumps(
             {"type": "wing_levels", "payload": wing_lv}, ensure_ascii=False))
 
@@ -1577,6 +1648,11 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                     if os.environ.get("LUMINA_WS_LOG") == "1":
                         logging.getLogger("lumina_ws").info("ws-single src=%s ch=%d v=%d", src, data.get("ch", -1), data.get("val", -1))
                     sender.set_channel(int(data["ch"]) - 1, data["val"], src)
+                elif isinstance(data, dict) and data.get("type") == "blackout":
+                    sender.set_blackout(bool(data.get("set")))
+                    logging.getLogger("lumina_ws").info("blackout %s (src=%s)", "ON" if data.get("set") else "OFF", src)
+                elif isinstance(data, dict) and data.get("type") == "wing_wave":
+                    sender.wing_wave(data.get("events") or [])
             except (ValueError, TypeError) as e:
                 # Одно битое сообщение не должно ронять соединение
                 logging.warning("Пропущено некорректное WS-сообщение: %s", e)
@@ -1617,6 +1693,8 @@ async def debug_dmx_handler(request: web.Request):
         # 500+ — свободный хвост вселенной, на нём гоняются тесты HTP-микса
         "ch_500_512": data[499:512],
         "wing_dev": "yes" if (sender._wing and sender._wing.dev) else "no",
+        "wing_led": (lambda lb: {"nonzero": sum(1 for i in range(0, 260, 2) if int.from_bytes(lb[i:i + 2], "little")), "sum": sum(int.from_bytes(lb[i:i + 2], "little") for i in range(0, 260, 2))})(bytes(sender._wing.led_body) if sender._wing else b""),
+        "blackout": sender._blackout,
         "clients": len(UI_CLIENTS),
         # Сколько ненулевых каналов держит каждый источник в HTP-миксе:
         # >1 WS-источника = кто-то ещё управляет светом (вкладка/headless).

@@ -751,6 +751,14 @@
                     <span class="slider"></span>
                 </label>
             </div>
+
+            <div class="menu-group toggle-group">
+                <div class="menu-group-title">Wave on button release (эксперимент)</div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="select-wing-wave" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
         </div>
         
         <div style="display: flex; gap: 25px;">
@@ -1113,6 +1121,9 @@
         'use strict';
         var WS = null, wantOpen = true, retry = 0;
         var blackout = false;
+        var waveOn = true;
+        var waveToggle = document.getElementById('select-wing-wave');
+        if (waveToggle) waveToggle.addEventListener('change', function () { waveOn = waveToggle.checked; });
         var curScene = -1, lastDigit = -1;
         var armedPad = null, holdTimer = null, HOLD_MS = 2400;
         var encLast = [0, 0, 0, 0];
@@ -1126,7 +1137,9 @@
 
         window.__wsPanel = {
             connected: function () { return !!(WS && WS.readyState === 1); },
-            state: function () { return blackout; }
+            state: function () { return blackout; },
+            waveOn: function () { return waveOn; },
+            waveFrom: function (b) { waveFrom(b); }
         };
 
         function el(id) { return document.getElementById(id); }
@@ -1289,7 +1302,7 @@
             blackout = !blackout;
             var bi = el('blackout-indicator');
             if (bi) bi.classList.toggle('blinking', blackout);
-            apply();
+            send_raw(JSON.stringify({ type: 'blackout', set: blackout ? 1 : 0 }));
             log('Blackout: ' + (blackout ? 'ON' : 'OFF'));
         }
         var biEl = el('blackout-indicator');
@@ -1338,12 +1351,36 @@
             setRaw(ch, Math.max(0, Math.min(255, parseInt(v, 10) || 0)));
         }
 
-        // Физические кнопки крыла -> кнопки панели (сбор 13.08, ПЕРЕСБОР 13.08:
-        // цифры крыла сдвинуты на 1 — физическая 0 = id 66; нижняя клавиатура)
-        var HW_MAP = { 126: 'Go+', 119: 'Go-', 64: 'Store', 57: 'Clear', 70: 'Please', 66: '0', 58: '1', 59: '2', 60: '3', 50: '4', 51: '5', 52: '6', 42: '7', 43: '8', 44: '9' };
-        function findPad(label) {
-            var sec = (label === 'Go+' || label === 'Go-') ? '.faders-section' : '.keypad-section';
-            var root = document.querySelector(sec);
+        // Физические кнопки крыла -> кнопки панели (сбор 13.08, полный):
+        // keypad-цифры: 66=0 58=1 59=2 60=3 50=4 51=5 52=6 42=7 43=8 44=9;
+        // функции: 126=Go+ 119=Go- 64=Store 57=Clear 70=Please 45=+ 53=Thru
+        // 61=- 69=At 68=If (нижняя клавиатура); верхний ряд сцен 1-6:
+        // 112=1 113=2 114=3 115=4 116=5 117=6 (пады под фейдерами);
+        // 67=квадрат(■) = точка '.'; 118=Pause = blackout (иконка B в хедере).
+        var HW_MAP = {
+            126: { l: 'Go+', s: 'faders' }, 119: { l: 'Go-', s: 'faders' },
+            64: { l: 'Store', s: 'keypad' }, 57: { l: 'Clear', s: 'keypad' }, 70: { l: 'Please', s: 'keypad' },
+            45: { l: '+', s: 'keypad' }, 53: { l: 'Thru', s: 'keypad' }, 61: { l: '-', s: 'keypad' },
+            69: { l: 'At', s: 'keypad' }, 68: { l: 'If', s: 'keypad' },
+            66: { l: '0', s: 'keypad' }, 58: { l: '1', s: 'keypad' }, 59: { l: '2', s: 'keypad' },
+            60: { l: '3', s: 'keypad' }, 50: { l: '4', s: 'keypad' }, 51: { l: '5', s: 'keypad' },
+            52: { l: '6', s: 'keypad' }, 42: { l: '7', s: 'keypad' }, 43: { l: '8', s: 'keypad' },
+            44: { l: '9', s: 'keypad' },
+            112: { l: '1', s: 'faders' }, 113: { l: '2', s: 'faders' }, 114: { l: '3', s: 'faders' },
+            115: { l: '4', s: 'faders' }, 116: { l: '5', s: 'faders' }, 117: { l: '6', s: 'faders' },
+            67: { l: '.', s: 'keypad' }, 118: { l: '__blackout__', s: '__blackout__' }
+        };
+        // Обратный маппинг label|sec -> id крыла (для волны на крыле)
+        var HW_REV = {};
+        for (var hwId in HW_MAP) {
+            if (HW_MAP.hasOwnProperty(hwId) && HW_MAP[hwId].l !== '__blackout__') {
+                HW_REV[HW_MAP[hwId].l + '|' + HW_MAP[hwId].s] = parseInt(hwId, 10);
+            }
+        }
+        var lastWingWave = 0;
+        function findPad(label, sec) {
+            var sel = (sec === 'faders') ? '.faders-section' : '.keypad-section';
+            var root = document.querySelector(sel);
             var found = null;
             (root ? [root] : []).forEach(function (r) {
                 r.querySelectorAll('button.pad').forEach(function (b) {
@@ -1361,12 +1398,66 @@
             b.classList.add('ws-flash');
             setTimeout(function () { b.classList.remove('ws-flash'); }, 220);
         }
+        // Эксперимент 14.08: волна от отжатой кнопки по всем падам/иконкам
+        // (задержка вспышки ~ расстояние от центра кнопки). Параллельно
+        // та же волна уходит на ФИЗИЧЕСКОЕ крыло: [id, delay] по WS.
+        function waveEvents(src) {
+            if (!src) return [];
+            var sr = src.getBoundingClientRect();
+            var sx = sr.left + sr.width / 2, sy = sr.top + sr.height / 2;
+            var ev = [];
+            document.querySelectorAll('button.pad').forEach(function (b) {
+                var r = b.getBoundingClientRect();
+                var d = Math.sqrt(Math.pow(r.left + r.width / 2 - sx, 2) + Math.pow(r.top + r.height / 2 - sy, 2));
+                var wr = b.parentElement.closest('.faders-section');
+                var sec = wr ? 'faders' : 'keypad';
+                var id = HW_REV[b.innerText.trim() + '|' + sec];
+                ev.push([id, Math.round(d * 0.6)]);
+            });
+            return ev;
+        }
+        function waveFrom(src) {
+            if (!waveOn) return;
+            if (!src) return;
+            var sr = src.getBoundingClientRect();
+            var sx = sr.left + sr.width / 2, sy = sr.top + sr.height / 2;
+            var targets = [];
+            document.querySelectorAll('button.pad').forEach(function (b) { targets.push(b); });
+            var bi = document.getElementById('blackout-indicator');
+            if (bi) targets.push(bi);
+            targets.forEach(function (b) {
+                var r = b.getBoundingClientRect();
+                var d = Math.sqrt(Math.pow(r.left + r.width / 2 - sx, 2) + Math.pow(r.top + r.height / 2 - sy, 2));
+                setTimeout(function () {
+                    b.classList.add('ws-flash');
+                    setTimeout(function () { b.classList.remove('ws-flash'); }, 700);
+                }, Math.round(d * 0.6));
+            });
+        }
         function wingBtnTo(id, v) {
-            var label = HW_MAP[id];
-            if (!label) return;
-            var b = findPad(label);
+            var m = HW_MAP[id];
+            if (!m) return;
+            var b;
+            if (m.l === '__blackout__') {
+                b = document.getElementById('blackout-indicator');
+                if (!b) return;
+                if (v > 0) { b.click(); flashPad(b); } else waveFrom(b);
+                return;
+            }
+            b = findPad(m.l, m.s);
             if (!b) return;
             if (v > 0) { b.click(); flashPad(b); }
+            else {
+                waveFrom(b);
+                if (waveOn) {
+                    var now = Date.now();
+                    if (now - lastWingWave > 300) {
+                        lastWingWave = now;
+                        var ev = waveEvents(b);
+                        send_raw(JSON.stringify({ type: 'wing_wave', events: ev }));
+                    }
+                }
+            }
         }
 
         // --- Соединение ---
