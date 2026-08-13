@@ -1,787 +1,1502 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lumina Web-bord — COB faders</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mini Wing 6 Web Avatar</title>
 <style>
-  html, body { margin: 0; padding: 0; height: 100%; background: #0b0b0e; font-family: Segoe UI, Arial, sans-serif; }
-  #arenaFrame { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; background: #111; }
+    :root {
+        --bg-color: #2a2a2a;
+        --panel-bg: #1e1e1e;
+        --text-color: #dcb342;
+        --btn-bg: #0a0a0a;
+        --btn-hover: #222;
+        --fader-track: #000;
+        --fader-thumb: #888;
+    }
 
-  /* ---- плавающий пульт ---- */
-  #panel {
-    position: fixed; left: 24px; top: 24px; z-index: 9999;
-    width: 500px; background: #14141a;
-    border: 1px solid #333a4a; border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,0.6);
-    color: #e6e8ee; user-select: none; font-size: 12px;
-  }
-  #panel .head {
-    cursor: move; padding: 8px 10px; display: flex; align-items: center; gap: 8px;
-    background: linear-gradient(180deg,#333a4a,#232734); border-radius: 10px 10px 0 0;
-  }
-  #panel .head .title { flex: 1; font-weight: 600; letter-spacing: .3px; }
-  #panel .head .btn { background:#1d2330; border:1px solid #3a4255; color:#cfd6e4; border-radius:6px;
-    cursor:pointer; font-size:11px; padding:2px 7px; }
-  #panel .head .btn:hover { background:#2a3245; }
-  #panel .head .btn.round { border-radius:50%; width:20px; height:20px; padding:0;
-    font-weight:700; font-size:11px; line-height:18px; text-align:center; }
-  #panel .status { display:flex; align-items:center; gap:5px; }
-  #panel .dot { width:9px; height:9px; border-radius:50%; background:#e04848; }
-  #panel .dot.on { background:#44d676; }
+    /* Цветовые темы (Палитры) */
+    body.theme-gold {
+        --text-color: #dcb342;
+        --screen-ink: #ff5533;
+        --screen-active: #ff7755;
+    }
 
-  #panel .body { padding: 10px 12px 12px; display:flex; flex-direction:column; gap:10px; }
-  #panel .body.hidden { display:none; }
-  .cols { display:flex; gap:14px; align-items:stretch; }
-  .mainCol { flex:1; min-width:0; display:flex; flex-direction:column; }
+    body.theme-cyan {
+        --bg-color: #121c24;
+        --panel-bg: #0a131a;
+        --text-color: #00e5ff;
+        --screen-ink: #00b0ff;
+        --screen-active: #00e5ff;
+    }
 
-  /* ---- ColorChanger: полноширинный, обычный фейдер + шкала CH7 ---- */
-  .changer { background:#171b24; border:1px solid #2c3342; border-radius:8px; padding:7px 9px 5px; }
-  .changer .top { display:flex; align-items:center; gap:8px; margin-bottom:1px; }
-  .changer .top label { flex:1; font-size:11px; color:#fff; font-weight:700; letter-spacing:.3px; }
-  .changer input[type=range] { width:100%; accent-color:#5b8def; margin:2px 0 0; }
-  .changer .scale { position:relative; height:20px; margin-top:1px; }
-  .changer .scale .seg { position:absolute; top:0; bottom:0; border-left:1px solid #3a4255; }
-  .changer .scale .seg span { position:absolute; left:2px; bottom:0; font-size:8.5px; color:#8fb3f5; white-space:nowrap; }
-  .row { display:grid; grid-template-columns: 22px minmax(0,1fr) 30px 44px; align-items:center;
-    gap:6px; margin-bottom:7px; }
-  .row label { font-size:11px; color:#c2c9d8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .row input[type=range] { width:100%; min-width:0; accent-color:#5b8def; justify-self:stretch; }
-  .row .val { text-align:right; font-variant-numeric:tabular-nums; color:#fff; font-weight:600; overflow:hidden; cursor:text; }
-  .row .val input, .vrow .val input { width:36px; background:#0d1017; border:1px solid #4a9dff; color:#fff;
-    font-size:11px; font-weight:600; text-align:right; border-radius:4px; padding:1px 3px; box-sizing:border-box; outline:none; }
-  .row .mini { background:#1d2330; border:1px solid #3a4255; color:#b8c0d0; border-radius:5px;
-    cursor:pointer; font-size:10px; font-weight:700; padding:3px 0; width:100%; box-sizing:border-box;
-    justify-self:stretch; }
-  .row .mini:hover { background:#2a3245; }
-  .row .mini.on { background:#e8b33a; border-color:#e8b33a; color:#221900; }
-  .row.gr label{color:#ff9d9d;} .row.gg label{color:#9dffb0;} .row.gb label{color:#9dc8ff;}
-  .row.gw label{color:#ffffff;}
-  .row.gr input[type=range]{accent-color:#ff5b5b;} .row.gg input[type=range]{accent-color:#4ae06a;}
-  .row.gb input[type=range]{accent-color:#4a9dff;} .row.gw input[type=range]{accent-color:#e8e8f0;}
-  .pads { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; }
-  .pad { aspect-ratio:1; background:#1d2330; border:1px solid #3a4255; border-radius:6px;
-    color:#8b93a5; font-weight:700; font-size:13px; cursor:pointer; user-select:none; }
-  .pad:hover { background:#2a3245; color:#cfd6e4; }
-  .pad.scene.on { background:#e8b33a; border-color:#e8b33a; color:#221900; box-shadow:0 0 8px rgba(232,179,58,.4); }
-  .pad.rainbow { background: conic-gradient(#ff3b3b, #ffa03b, #fff23b, #4ae06a, #4a9dff, #c06ae0, #ff3b3b);
-    border-color:transparent; box-shadow:0 0 6px rgba(255,120,120,.25); }
-  .pad.rainbow:hover { box-shadow:0 0 10px rgba(255,120,120,.5); }
-  .pad.fade { position:relative; overflow:hidden; background:#1d2330; }
-  .pad.fade .lbl { position:absolute; left:0; right:0; height:50%; display:flex; align-items:center;
-    justify-content:center; font-size:9px; font-weight:700; letter-spacing:1px; }
-  .pad.fade .lbl.off { top:0; color:#5c6476; }
-  .pad.fade .lbl.on { bottom:0; color:#e8b33a; }
-  .pad.fade .sw-knob { position:absolute; left:0; right:0; top:50%; height:50%;
-    background:#2a3245; border-radius:4px;
-    border-top:1px solid #0d1017; border-bottom:1px solid #0d1017;
-    background-image: repeating-linear-gradient(180deg, transparent 0 7px, rgba(0,0,0,.45) 7px 9px);
-    transition: top .15s ease; }
-  .pad.fade.on .sw-knob { top:0; }
-  .pad.scene { position:relative; }
-  .pad.scene .thmb { position:absolute; left:3px; right:3px; bottom:3px; height:8px; display:flex; gap:1px;
-    border-radius:2px; overflow:hidden; opacity:0; transition:opacity .15s; }
-  .pad.scene .thmb.has { opacity:1; }
-  .pad.scene .thmb i { flex:0 0 auto; }
-  .pad.scene .stb { position:absolute; top:2px; right:3px; display:none; background:#e04848; color:#fff;
-    font-size:7px; font-weight:700; border-radius:3px; padding:0 3px; line-height:10px; }
-  .pad.scene .stb.show { display:block; }
-  .pad.bo { background:#0d0f14; color:#e04848; border:1px solid #e04848; font-size:10px; letter-spacing:.5px; }
-  .pad.bo:hover { background:#1a1418; }
-  .pad.bo.on { animation: boBlink 0.35s steps(1,end) infinite; }
-  @keyframes boBlink { 0%,49.9% { background:#e04848; color:#fff; border-color:#e04848; }
-    50%,100% { background:#0d0f14; color:#e04848; border-color:#e04848; } }
-  .pad.arm { animation: armBlink 0.5s steps(1,end) infinite; }
-  @keyframes armBlink { 0%,49.9% { background:#e8b33a; border-color:#e8b33a; color:#221900;
-      box-shadow:0 0 8px rgba(232,179,58,.4); }
-    50%,100% { background:#2a3245; border-color:#ffd76a; color:#fff; box-shadow:none; } }
-  .pad.flash { animation: flashBlink 0.18s steps(1,end) 3; }
-  @keyframes flashBlink { 0%,49.9% { background:#fff; border-color:#fff; color:#000; }
-    50%,100% { background:#e8b33a; border-color:#e8b33a; color:#221900; } }
-  .padRow { display:flex; flex-direction:column; gap:4px; padding:8px; box-sizing:border-box;
-    background:#171b24; border:1px solid #2c3342; border-radius:8px; }
-  .padsLabel { color:#5c6476; font-size:9px; letter-spacing:1.5px; font-weight:700; text-align:center; }
-  .tplRow { display:flex; gap:4px; margin-bottom:2px; }
-  .tplRow select { flex:1; min-width:0; background:#0d1017; border:1px solid #3a4255; color:#cfd6e4;
-    border-radius:5px; font-size:10px; padding:2px 4px; outline:none; }
-  .tplRow select:focus { border-color:#4a9dff; }
-  .tplRow select option { background:#171b24; }
-  .tplRow button { background:#1d2330; border:1px solid #3a4255; color:#b8c0d0; border-radius:5px;
-    cursor:pointer; font-size:12px; font-weight:700; line-height:1; padding:2px 9px; }
-  .tplRow button:hover { background:#2a3245; }
-  .pads { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; }
-  .pad { aspect-ratio:1; background:#1d2330; border:1px solid #3a4255; border-radius:6px;
-    color:#8b93a5; font-weight:700; font-size:13px; cursor:pointer; user-select:none; }
-  .pad:hover { background:#2a3245; color:#cfd6e4; }
-  .pad.scene.on { background:#e8b33a; border-color:#e8b33a; color:#221900; box-shadow:0 0 8px rgba(232,179,58,.4); }
+    body.theme-green {
+        --bg-color: #0f1d14;
+        --panel-bg: #07120b;
+        --text-color: #39ff14;
+        --screen-ink: #00cc22;
+        --screen-active: #39ff14;
+    }
 
-  /* ---- всплывающая подсказка по [i] ---- */
-  #tip { position:absolute; right:44px; top:38px; width:250px; z-index:10000;
-    background:#1b2029; border:1px solid #3a4255; border-radius:8px;
-    box-shadow:0 8px 24px rgba(0,0,0,.55); padding:9px 11px;
-    font-size:11px; line-height:1.55; color:#c9d0de; display:none; }
-  #tip.show { display:block; }
-  #tip b { color:#fff; }
-  .hint { margin-top:9px; font-size:11px; color:#b6bdcc; line-height:1.6; }
+    body.theme-mono {
+        --bg-color: #222222;
+        --panel-bg: #161616;
+        --text-color: #eeeeee;
+        --screen-ink: #aaaaaa;
+        --screen-active: #ffffff;
+    }
 
-  /* ---- вертикальные ведущие: Диммер / Строб ---- */
-  .masters { display:flex; gap:10px; align-items:stretch; }
-  .vrow { display:flex; flex-direction:column; align-items:center; gap:6px; width:64px;
-    background:#171b24; border:1px solid #2c3342; border-radius:8px; padding:8px 5px 8px; }
-  .vrow label { font-size:11px; color:#c2c9d8; }
-  .vrow input[type=range].vert {
-    width:24px; flex:1; height:auto; min-height:100px; margin:2px 0 1px; padding:0;
-    writing-mode: vertical-lr; direction: rtl; accent-color:#5b8def;
-  }
-  .vrow .val { font-variant-numeric:tabular-nums; color:#fff; font-weight:600; font-size:12px; line-height:1; cursor:text; }
-  .vrow .mini { background:#1d2330; border:1px solid #3a4255; color:#b8c0d0; border-radius:5px;
-    cursor:pointer; font-size:10px; font-weight:700; padding:3px 0; width:56px; box-sizing:border-box; }
-  .vrow .mini:hover { background:#2a3245; }
-  .vrow .mini.on { background:#e8b33a; border-color:#e8b33a; color:#221900; }
+    body.theme-white {
+        --bg-color: #fdfaf3;
+        --panel-bg: #f4eee1;
+        --text-color: #2b2b2b;
+        --screen-ink: #ff8800;
+        --screen-active: #ffaa33;
+        --btn-bg: #eaddc7;
+    }
+    
+    body.theme-white .display-screen {
+        background-color: #1a1815;
+        border-color: #333;
+    }
 
-  /* ---- модалка RGBW-колеса ---- */
-  #rainbowModal { position:fixed; z-index:10001; display:none; }
-  #rainbowModal.open { display:block; }
-  .rmodal { background:#12151f; border:1px solid #2c3342; border-radius:10px; padding:12px; width:252px;
-    box-shadow:0 8px 30px rgba(0,0,0,.6); }
-  .rm-head { display:flex; justify-content:space-between; align-items:center; color:#e6e8ee;
-    font-size:12px; font-weight:700; margin-bottom:8px; cursor:move; user-select:none; }
-  .rm-head span { letter-spacing:.3px; }
-  .rm-head .hbtns { display:flex; gap:6px; }
-  .rm-head .hbtn { background:#1d2330; border:1px solid #3a4255; color:#cfd6e4; border-radius:6px;
-    cursor:pointer; font-size:11px; padding:1px 7px; line-height:1.4; }
-  .rm-head .hbtn:hover { background:#2a3245; }
-  #wheel { display:block; margin:0 auto; cursor:crosshair; }
-  .rmodal.min #wheel, .rmodal.min .rm-hex, .rmodal.min .rm-note { display:none; }
-  .rm-hex { display:flex; align-items:center; gap:8px; margin-top:10px; }
-  .rm-hex label { color:#8b93a5; font-size:11px; }
-  .hexbox { flex:1; display:flex; align-items:center; background:#0d1017; border:1px solid #2c3342;
-    border-radius:5px; padding:4px 8px; }
-  .hexbox .hash { color:#5c6476; font-weight:700; font-size:13px; }
-  .hexbox input { background:none; border:none; outline:none; color:#fff; width:62px;
-    font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:1px; }
-  .rm-note { color:#5c6476; font-size:9.5px; margin-top:8px; text-align:center; }
+    body.theme-white .dropdown-menu {
+        background-color: #f4eee1;
+        border-color: #ccc;
+    }
+    body.theme-white .menu-select {
+        background-color: #fff;
+        border-color: #bbb;
+        color: #2b2b2b;
+    }
+    body.theme-white .menu-select option {
+        background-color: #fff;
+        color: #2b2b2b;
+    }
+    body.theme-white .dropdown-header {
+        border-bottom-color: #ccc;
+        color: #2b2b2b;
+    }
+    
+    body.theme-white .pad {
+        border-color: #a09787;
+        box-shadow: inset 0 1px 1px rgba(255,255,255,0.5), 0 3px 5px rgba(0,0,0,0.2);
+    }
+    body.theme-white .pad:active {
+        box-shadow: inset 0 1px 3px rgba(0,0,0,0.3), 0 1px 1px rgba(0,0,0,0.1);
+    }
+    
+    body.theme-white .vert::-webkit-slider-thumb {
+        border-color: #a09787;
+        box-shadow: inset 0 1px 1px rgba(255,255,255,0.5), 0 3px 5px rgba(0,0,0,0.2);
+    }
+    body.theme-white .vert::-moz-range-thumb {
+        border-color: #a09787;
+        box-shadow: inset 0 1px 1px rgba(255,255,255,0.5), 0 3px 5px rgba(0,0,0,0.2);
+    }
+    
+    body.theme-white .vert {
+        background: linear-gradient(to right,
+            transparent 35%, #d1c8b6 35%, #e1d9c9 38%,
+            #e1d9c9 62%, #d1c8b6 65%, transparent 65%);
+    }
+
+    body.theme-white .encoder-knob {
+        background: radial-gradient(circle at 45% 45%, #f4eee1, #d1c8b6);
+        border-color: #a09787;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.2), inset 0 1px 2px rgba(255,255,255,0.8);
+    }
+    
+    body.theme-white .encoder-dimple {
+        background: radial-gradient(circle at -20% -20%, #d1c8b6, #f4eee1);
+        /* border: 1.5px solid #a09787; */
+        /* box-shadow: inset 0 2px 4px rgba(0,0,0,0.9), 0 0 3px rgba(0,0,0,0.2); */
+        box-shadow: inset 0 2px 4px rgba(0,0,0,0.9);
+    }
+
+    body.dimple-glow .encoder-dimple {
+        border: 1.5px solid var(--text-color, #dcb342);
+        box-shadow: inset 0 2px 4px rgba(0,0,0,0.9), 0 0 4px var(--text-color, #dcb342);
+    }
+
+    body.theme-white.dimple-glow .encoder-dimple {
+        border: 1.5px solid #a09787;
+        box-shadow: inset 0 2px 4px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.2);
+    }
+
+    /* При включенном GLOW - затемнение всех надписей и значков */
+    body.dimple-glow .pad {
+        color: color-mix(in srgb, var(--text-color) 20%, transparent);
+    }
+    body.dimple-glow .display-line,
+    body.dimple-glow .display-line.active,
+    body.dimple-glow .screen-icon,
+    body.dimple-glow .icon-blackout {
+        opacity: 0.15;
+    }
+
+    /* Без теней (Flat Minimal) — убирает тени у кнопок, фейдеров, энкодеров и панели */
+    body.btn-shape-flat .pad,
+    body.btn-shape-flat .encoder-knob,
+    body.btn-shape-flat .console {
+        box-shadow: none !important;
+        border-width: 1px !important;
+    }
+
+    body.btn-shape-flat .vert::-webkit-slider-thumb {
+        box-shadow: none !important;
+        border-width: 1px !important;
+    }
+
+    body.btn-shape-flat .vert::-moz-range-thumb {
+        box-shadow: none !important;
+        border-width: 1px !important;
+    }
+
+    body {
+        background-color: var(--bg-color);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        margin: 0;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        color: var(--text-color);
+        user-select: none;
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+    }
+
+    .console {
+        background-color: var(--panel-bg);
+        border-radius: 8px;
+        padding: 30px;
+        box-shadow: 0 15px 30px rgba(0,0,0,0.5), inset 0 2px 2px rgba(255,255,255,0.1);
+        display: flex;
+        flex-direction: column;
+        gap: 30px;
+    }
+
+    /* --- ВЕРХНЯЯ ПАНЕЛЬ (ДИСПЛЕЙ И ЭНКОДЕРЫ) --- */
+    .top-section {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 25px;
+        padding-right: 20px;
+    }
+
+    /* Экранчик */
+    .display-screen {
+        background-color: #050a06;
+        border: 2px solid #000;
+        border-radius: 6px;
+        box-shadow: inset 0 2px 6px rgba(0,0,0,0.9), 0 1px 2px rgba(255,255,255,0.05);
+        padding: 6px 8px 6px 12px;
+        font-family: 'Consolas', 'Courier New', monospace;
+        color: var(--screen-ink, #ff5533);
+        width: 250px;
+        height: 70px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        overflow: hidden;
+        box-sizing: border-box;
+    }
+
+    .display-text-container {
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        flex: 1;
+        overflow: hidden;
+        height: 100%;
+    }
+
+    .display-line {
+        font-size: 11px;
+        line-height: 1.4;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        opacity: 0.6;
+        color: var(--screen-ink, #ff5533);
+        transition: opacity 0.3s ease;
+    }
+
+    .display-line.active {
+        opacity: 1.0;
+        font-weight: bold;
+        color: var(--screen-active, #ff7755);
+    }
+
+    /* Столбик иконок справа экранчика */
+    .screen-icon-col {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        align-items: center;
+        height: 100%;
+        width: 26px;
+        padding: 2px 0 2px 6px;
+        border-left: 1px solid rgba(255, 85, 51, 0.2);
+        box-sizing: border-box;
+    }
+
+    .screen-icon {
+        cursor: pointer;
+        opacity: 0.8;
+        transition: opacity 0.15s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 16px;
+        height: 16px;
+        box-sizing: border-box;
+    }
+
+    .screen-icon:hover {
+        opacity: 1;
+    }
+
+    .screen-icon svg {
+        width: 14px;
+        height: 14px;
+        fill: var(--screen-active, #ff7755);
+        display: block;
+    }
+
+    /* Иконка Blackout (B) — временно скрыта */
+    .icon-blackout {
+        display: none !important;
+        width: 16px;
+        height: 16px;
+        border-radius: 3px;
+        background: #250000;
+        border: 1px solid #500;
+        color: #772222;
+        font-size: 10px;
+        line-height: 1;
+        font-weight: bold;
+        font-family: Arial, sans-serif;
+        align-items: center;
+        justify-content: center;
+        user-select: none;
+        box-sizing: border-box;
+        transition: opacity 0.3s ease;
+    }
+
+    /* Выпадающее меню настроек / роутинга */
+    .dropdown-menu {
+        display: none;
+        position: absolute;
+        top: 100px;
+        left: 45px;
+        width: 320px;
+        background-color: #161616;
+        border: 2px solid #000;
+        border-radius: 6px;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.8), 0 0 1px rgba(255,255,255,0.1);
+        z-index: 1000;
+        padding: 15px;
+        box-sizing: border-box;
+        color: var(--text-color);
+        font-size: 12px;
+    }
+
+    .dropdown-menu.open {
+        display: block;
+    }
+
+    .dropdown-header {
+        font-weight: bold;
+        font-size: 13px;
+        margin-bottom: 12px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid #333;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        color: #ff7755;
+    }
+
+    .dropdown-close {
+        cursor: pointer;
+        color: #888;
+        font-size: 14px;
+    }
+
+    .dropdown-close:hover {
+        color: #fff;
+    }
+
+    .menu-group {
+        margin-bottom: 14px;
+    }
+
+    .menu-group-title {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        color: #999;
+        margin-bottom: 6px;
+    }
+
+    .menu-select {
+        width: 100%;
+        background-color: #0a0a0a;
+        color: var(--text-color);
+        border: 1px solid #333;
+        border-radius: 4px;
+        padding: 6px 10px;
+        font-size: 12px;
+        outline: none;
+        cursor: pointer;
+    }
+
+    .menu-select:focus {
+        border-color: #ff7755;
+    }
+
+    .menu-select option {
+        background-color: #161616;
+        color: var(--text-color);
+    }
+
+    .toggle-group {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .toggle-group .menu-group-title {
+        margin-bottom: 0;
+    }
+    .toggle-switch {
+        position: relative;
+        display: inline-block;
+        width: 34px;
+        height: 18px;
+    }
+    .toggle-switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+    }
+    .toggle-switch .slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background-color: #222;
+        border: 1px solid #111;
+        transition: .2s;
+        border-radius: 18px;
+        box-shadow: inset 0 1px 3px rgba(0,0,0,0.8);
+    }
+    .toggle-switch .slider:before {
+        position: absolute;
+        content: "";
+        height: 12px;
+        width: 12px;
+        left: 2px;
+        bottom: 2px;
+        background-color: #888;
+        transition: .2s;
+        border-radius: 50%;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.5);
+    }
+    .toggle-switch input:checked + .slider {
+        background-color: var(--screen-ink, #ff7755);
+        border-color: #000;
+    }
+    .toggle-switch input:checked + .slider:before {
+        transform: translateX(16px);
+        background-color: #fff;
+    }
+    
+    body.theme-white .toggle-switch .slider {
+        background-color: #d1c8b6;
+        border-color: #a09787;
+        box-shadow: inset 0 1px 2px rgba(0,0,0,0.2);
+    }
+    body.theme-white .toggle-switch .slider:before {
+        background-color: #fff;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    }
+    body.theme-white .toggle-switch input:checked + .slider {
+        background-color: var(--screen-active, #ffaa33);
+        border-color: #d89020;
+    }
+
+    /* Класс для быстрого мигания (будет подключаться по кнопке) */
+    .icon-blackout.blinking {
+        animation: blackoutFastBlink 0.4s infinite alternate ease-in-out;
+    }
+
+    @keyframes blackoutFastBlink {
+        0% {
+            background: #250000;
+            border-color: #500;
+            color: #772222;
+            box-shadow: none;
+        }
+        100% {
+            background: #e50000;
+            border-color: #ff5555;
+            color: #ffffff;
+            box-shadow: 0 0 8px rgba(255,0,0,0.9);
+        }
+    }
+
+    .encoder-wrapper {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        width: 90px;
+        height: 90px;
+    }
+
+    .encoder-input {
+        display: none;
+    }
+
+    .encoder-knob {
+        width: 85px;
+        height: 85px;
+        background: radial-gradient(circle at 45% 45%, color-mix(in srgb, var(--text-color) 25%, #222222), #111111);
+        border-radius: 50%;
+        position: relative;
+        cursor: pointer;
+        border: 2px solid #050505;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.6), inset 0 1px 1px rgba(255,255,255,0.1);
+        transition: transform 0.05s ease-out, box-shadow 0.05s ease-out;
+    }
+
+    .encoder-knob.pressed, .encoder-knob:active {
+        box-shadow: 0 1px 3px rgba(0,0,0,0.8), inset 0 2px 4px rgba(0,0,0,0.8);
+    }
+
+    .encoder-dimple {
+        width: 22px;
+        height: 22px;
+        background: radial-gradient(circle at -20% -20%, #111111, color-mix(in srgb, var(--text-color) 25%, #222222));
+        border-radius: 50%;
+        position: absolute;
+        top: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        /* box-shadow: inset 0 2px 4px rgba(0,0,0,0.9), 0 0 3px var(--text-color, #dcb342); */
+        box-shadow: inset 0 2px 4px rgba(0,0,0,0.9);
+        /* border: 1.5px solid var(--text-color, #dcb342); */
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    /* --- НИЖНЯЯ ПАНЕЛЬ (ФЕЙДЕРЫ, КЛАВИАТУРА) --- */
+    .bottom-section {
+        display: flex;
+        gap: 20px;
+        align-items: flex-end;
+    }
+
+    /* Единая секция фейдеров */
+    .faders-section {
+        display: flex;
+        gap: 6px;
+    }
+
+    .channel-strip {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .channel-strip .vert {
+        height: 150px;
+    }
+
+    .channel-strip button {
+        width: 45px;
+        height: 35px;
+        font-size: 11px;
+    }
+
+    /* Секция Numpad */
+    .keypad-section {
+        display: grid;
+        grid-template-columns: repeat(4, 45px);
+        grid-template-rows: repeat(5, 35px);
+        gap: 6px;
+        margin-left: 10px;
+    }
+
+    .keypad-section button {
+        width: 100%;
+        height: 100%;
+        font-size: 11px;
+    }
+    
+    .store-clear-row {
+        grid-column: span 3;
+        display: flex;
+        gap: 6px;
+    }
+
+    .store-clear-row button {
+        flex: 1;
+        height: 100%;
+        font-size: 11px;
+    }
+
+    .btn-please {
+        grid-column: 4;
+    }
+
+    /* Секция COM (COM1...COM5) */
+    .com-section {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-left: 6px;
+    }
+
+    .com-section button {
+        width: 45px;
+        height: 35px;
+        font-size: 10px;
+    }
+
+
+
+    /* --- БАЗОВЫЕ ЭЛЕМЕНТЫ (ФЕЙДЕРЫ И КНОПКИ) --- */
+    
+    /* Кнопки (по образцу) */
+    .pad {
+        background-color: var(--btn-bg);
+        color: var(--text-color);
+        border: 2px solid #000;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 600;
+        box-shadow: inset 0 1px 1px rgba(255,255,255,0.1), 0 3px 5px rgba(0,0,0,0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        position: relative;
+        transition: transform 0.1s, box-shadow 0.1s, color 0.3s ease;
+    }
+
+    .pad:active {
+        transform: translateY(2px);
+        box-shadow: inset 0 1px 3px rgba(0,0,0,0.8), 0 1px 1px rgba(0,0,0,0.5);
+    }
+
+    .pad .thmb {
+        /* Элемент-пустышка из образца */
+        display: none; 
+    }
+
+    /* Фейдеры */
+    .vert {
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        appearance: none;
+        writing-mode: vertical-lr;
+        direction: rtl;
+        width: 45px;
+        height: 150px;
+        background: linear-gradient(to right,
+            transparent 35%, #050505 35%, #0a0a0a 38%,
+            #0a0a0a 62%, #050505 65%, transparent 65%);
+        outline: none;
+        cursor: pointer;
+    }
+
+    .vert::-webkit-slider-runnable-track {
+        background: transparent;
+    }
+
+    .vert::-moz-range-track {
+        background: transparent;
+    }
+
+    .vert::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 45px;
+        height: 35px;
+        background-color: var(--btn-bg);
+        background-image:
+            linear-gradient(var(--text-color), var(--text-color)),
+            linear-gradient(var(--text-color), var(--text-color)),
+            linear-gradient(var(--text-color), var(--text-color));
+        background-size: 18px 1.5px;
+        background-position: center 13px, center 17px, center 21px;
+        background-repeat: no-repeat;
+        border: 2px solid #000;
+        border-radius: 4px;
+        cursor: pointer;
+        box-shadow: inset 0 1px 1px rgba(255,255,255,0.1), 0 3px 5px rgba(0,0,0,0.5);
+    }
+
+    .vert::-moz-range-thumb {
+        width: 45px;
+        height: 35px;
+        background-color: var(--btn-bg);
+        background-image:
+            linear-gradient(var(--text-color), var(--text-color)),
+            linear-gradient(var(--text-color), var(--text-color)),
+            linear-gradient(var(--text-color), var(--text-color));
+        background-size: 18px 1.5px;
+        background-position: center 13px, center 17px, center 21px;
+        background-repeat: no-repeat;
+        border: 2px solid #000;
+        border-radius: 4px;
+        cursor: pointer;
+        box-shadow: inset 0 1px 1px rgba(255,255,255,0.1), 0 3px 5px rgba(0,0,0,0.5);
+    }
+
+    /* Нижний ряд кнопок */
+
 </style>
 </head>
 <body>
-  <iframe id="arenaFrame" src="/api/docs/example/"></iframe>
 
-  <div id="panel">
-    <div class="head" id="panelHead">
-      <div class="status" title="Соединение с Lumina"><span class="dot" id="dot"></span></div>
-      <div class="title">COB пульт</div>
-      <button class="btn round" id="infoBtn" title="Подсказка">i</button>
-      <button class="btn" id="collapseBtn">–</button>
-    </div>
-    <div id="tip">
-      <b>Dimmer</b> — яркость. <b>ColorChanger</b>: 0-210 смена цветов (выше = быстрее),
-      211-255 голосовое (AUTO). <b>Strobe</b> — мерцание поверх.
-      Двойной клик по числу — ручной ввод (0-255). HTP: кто выше — тот главный.
-    </div>
-    <div class="body" id="panelBody">
-      <div class="changer">
-        <div class="top">
-          <label>ColorChanger</label>
-          <span class="val" id="v206" title="Двойной клик — ввести значение (0-255)">0</span>
-          <button class="mini" id="autoBtn" data-ch="206" title="ON/OFF: клик — 255 (максимум, Voice 211+), повторный — 0">OFF</button>
-        </div>
-        <input type="range" id="ch206" min="0" max="255" value="0">
-        <div class="scale">
-          <div class="seg" style="left:0%;width:19.61%"><span>0-50 A2</span></div>
-          <div class="seg" style="left:19.61%;width:15.69%"><span>51-90 A3</span></div>
-          <div class="seg" style="left:35.29%;width:15.69%"><span>91-130 A4</span></div>
-          <div class="seg" style="left:50.98%;width:15.69%"><span>131-170</span></div>
-          <div class="seg" style="left:66.67%;width:15.69%"><span>171-210 A4</span></div>
-          <div class="seg" style="left:82.35%;width:17.65%"><span>211-255 Voice</span></div>
-        </div>
-      </div>
-      <div class="cols">
-        <div class="mainCol">
-          <div class="row gw"><label>W</label><input type="range" id="ch204" min="0" max="255" value="0"><span class="val" id="v204">0</span><button class="mini" data-ch="204" title="ВКЛ/ВЫКЛ">OFF</button></div>
-          <div class="row gr"><label>R</label><input type="range" id="ch201" min="0" max="255" value="0"><span class="val" id="v201">0</span><button class="mini" data-ch="201" title="ВКЛ/ВЫКЛ">OFF</button></div>
-          <div class="row gg"><label>G</label><input type="range" id="ch202" min="0" max="255" value="0"><span class="val" id="v202">0</span><button class="mini" data-ch="202" title="ВКЛ/ВЫКЛ">OFF</button></div>
-          <div class="row gb"><label>B</label><input type="range" id="ch203" min="0" max="255" value="0"><span class="val" id="v203">0</span><button class="mini" data-ch="203" title="ВКЛ/ВЫКЛ">OFF</button></div>
-          <div class="row" id="speedRow" style="display:none"><label>Ченджер</label><input type="range" id="ch207" min="0" max="255" value="0"><span class="val" id="v207">0</span><button class="mini" data-ch="207" title="ВКЛ/ВЫКЛ">OFF</button></div>
-          <div class="padRow">
-            <div class="padsLabel">SCENE</div>
-            <div class="tplRow">
-              <select id="tplSelect" title="Шаблон сцен (общий для всех устройств)"></select>
-              <button id="tplAdd" title="Сохранить текущие сцены как новый шаблон">+</button>
+<div class="console">
+    
+    <!-- ВЕРХНЯЯ ПАНЕЛЬ С ДИСПЛЕЕМ И ЭНКОДЕРАМИ -->
+    <div class="top-section">
+        <!-- Экранчик -->
+        <div class="display-screen" id="screen">
+            <div class="display-text-container">
+                <div class="display-line">Cmd: Ready</div>
+                <div class="display-line">Cmd: System Init</div>
+                <div class="display-line active" id="line-active">Cmd: Console Active</div>
             </div>
-            <div class="pads" id="pads"></div>
-          </div>
+            <div class="screen-icon-col">
+                <div class="screen-icon" id="menu-btn" title="Menu">
+                    <svg viewBox="0 0 16 16">
+                        <rect x="1" y="2" width="14" height="2" rx="1"/>
+                        <rect x="1" y="7" width="14" height="2" rx="1"/>
+                        <rect x="1" y="12" width="14" height="2" rx="1"/>
+                    </svg>
+                </div>
+                <div class="screen-icon icon-blackout" id="blackout-indicator" title="Blackout Indicator">B</div>
+                <div class="screen-icon" id="settings-btn" title="Settings">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M12,15.5 C10.067,15.5 8.5,13.933 8.5,12 C8.5,10.067 10.067,8.5 12,8.5 C13.933,8.5 15.5,10.067 15.5,12 C15.5,13.933 13.933,15.5 12,15.5 Z M19.433,12.98 C19.473,12.66 19.5,12.333 19.5,12 C19.5,11.667 19.473,11.34 19.433,11.02 L21.54,9.373 C21.733,9.227 21.787,8.953 21.66,8.733 L19.66,5.267 C19.533,5.047 19.267,4.96 19.04,5.053 L16.56,6.053 C16.04,5.653 15.48,5.32 14.867,5.067 L14.493,2.427 C14.453,2.187 14.247,2 14,2 L10,2 C9.753,2 9.547,2.187 9.507,2.427 L9.133,5.067 C8.52,5.32 7.96,5.66 7.44,6.053 L4.96,5.053 C4.733,4.96 4.467,5.047 4.34,5.267 L2.34,8.733 C2.213,8.953 2.267,9.227 2.46,9.373 L4.567,11.02 C4.527,11.34 4.5,11.673 4.5,12 C4.5,12.327 4.527,12.66 4.567,12.98 L2.46,14.627 C2.267,14.773 2.213,15.047 2.34,15.267 L4.34,18.733 C4.467,18.953 4.733,19.04 4.96,18.947 L7.44,17.947 C7.96,18.34 8.52,18.68 9.133,18.933 L9.507,21.573 C9.547,21.813 9.753,22 10,22 L14,22 C14.247,22 14.453,21.813 14.493,21.573 L14.867,18.933 C15.48,18.68 16.04,18.34 16.56,17.947 L19.04,18.947 C19.267,19.04 19.533,18.953 19.66,18.733 L21.66,15.267 C21.787,15.047 21.733,14.773 21.54,14.627 L19.433,12.98 Z"/>
+                    </svg>
+                </div>
+            </div>
         </div>
-        <div class="masters">
-          <div class="vrow"><label>Dimmer</label><input type="range" class="vert" id="ch200" min="0" max="255" value="0"><span class="val" id="v200">0</span><button class="mini" data-ch="200" title="ВКЛ/ВЫКЛ">OFF</button></div>
-          <div class="vrow"><label>Strobe</label><input type="range" class="vert" id="ch205" min="0" max="255" value="0"><span class="val" id="v205">0</span><button class="mini" data-ch="205" title="ВКЛ/ВЫКЛ">OFF</button></div>
-        </div>
-      </div>
-    </div>
-  </div>
 
-  <div id="rainbowModal" class="hidden">
-    <div class="rmodal">
-      <div class="rm-head"><span>RGBW палитра</span>
-        <div class="hbtns">
-          <button class="hbtn" id="rmMin" title="Свернуть">–</button>
-          <button class="hbtn" id="rmClose" title="Закрыть">×</button>
+        <!-- Выпадающее окно меню -->
+        <div class="dropdown-menu" id="dropdown-menu">
+            <div class="dropdown-header">
+                <span>Console Configuration</span>
+                <span class="dropdown-close" id="menu-close">✕</span>
+            </div>
+            
+            <div class="menu-group">
+                <div class="menu-group-title">DMX Routing Presets</div>
+                <select class="menu-select" id="select-dmx">
+                    <option value="Standard 1:1 (Univ 1)">Standard 1:1 (Universe 1)</option>
+                    <option value="Dual Universe (1+2)">Dual Universe (1 + 2 Split)</option>
+                    <option value="ArtNet / sACN Bridge">ArtNet / sACN Bridge</option>
+                    <option value="Custom Patch Matrix">Custom Patch Matrix...</option>
+                </select>
+            </div>
+
+            <div class="menu-group">
+                <div class="menu-group-title">Scene & Playback Mapping</div>
+                <select class="menu-select" id="select-scenes">
+                    <option value="Default 6 Ch + Masters">Default (6 Playbacks + Masters)</option>
+                    <option value="8 Direct Submasters">8 Direct Submasters Mode</option>
+                    <option value="Cue List Executor">Cue List Executor Mode</option>
+                    <option value="Busking Palette Layout">Busking Palette Layout</option>
+                </select>
+            </div>
         </div>
-      </div>
-      <canvas id="wheel" width="220" height="220"></canvas>
-      <div class="rm-hex">
-        <label>HEX</label>
-        <div class="hexbox"><span class="hash">#</span><input id="hexInput" maxlength="6" spellcheck="false" autocomplete="off"></div>
-      </div>
-      <div class="rm-note">Угол = цвет, от центра = яркость (Dimmer). Enter — применить HEX.</div>
+
+        <!-- Выпадающее окно настроек (Шестеренка) -->
+        <div class="dropdown-menu" id="settings-menu">
+            <div class="dropdown-header">
+                <span>UI Customization & Design</span>
+                <span class="dropdown-close" id="settings-close">✕</span>
+            </div>
+            
+            <div class="menu-group">
+                <div class="menu-group-title">Color Palette (Theme)</div>
+                <select class="menu-select" id="select-theme">
+                    <option value="theme-gold">Amber Gold (Default)</option>
+                    <option value="theme-cyan">Cyberpunk Neon Cyan</option>
+                    <option value="theme-green">Matrix High-Tech Green</option>
+                    <option value="theme-mono">Classic Monochrome White</option>
+                    <option value="theme-white">Creamy Studio White</option>
+                </select>
+            </div>
+
+            <div class="menu-group">
+                <div class="menu-group-title">Button Design & Shape</div>
+                <select class="menu-select" id="select-shape">
+                    <option value="btn-shape-default">3D (Default)</option>
+                    <option value="btn-shape-flat">Flat (No Shadows)</option>
+                </select>
+            </div>
+
+            <div class="menu-group toggle-group">
+                <div class="menu-group-title">Encoder Dimple Glow</div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="select-dimple-glow">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="menu-group toggle-group">
+                <div class="menu-group-title">Wave on button release (эксперимент)</div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="select-wing-wave" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+        
+        <div style="display: flex; gap: 25px;">
+            <!-- Энкодер 1 -->
+        <div class="encoder-wrapper">
+            <input type="range" class="encoder-input" id="enc1" min="0" max="255" value="127">
+            <div class="encoder-knob" id="knob1"><div class="encoder-dimple"></div></div>
+        </div>
+        <!-- Энкодер 2 -->
+        <div class="encoder-wrapper">
+            <input type="range" class="encoder-input" id="enc2" min="0" max="255" value="127">
+            <div class="encoder-knob" id="knob2"><div class="encoder-dimple"></div></div>
+        </div>
+        <!-- Энкодер 3 -->
+        <div class="encoder-wrapper">
+            <input type="range" class="encoder-input" id="enc3" min="0" max="255" value="127">
+            <div class="encoder-knob" id="knob3"><div class="encoder-dimple"></div></div>
+        </div>
+            <!-- Энкодер 4 -->
+            <div class="encoder-wrapper">
+                <input type="range" class="encoder-input" id="enc4" min="0" max="255" value="127">
+                <div class="encoder-knob" id="knob4"><div class="encoder-dimple"></div></div>
+            </div>
+        </div>
     </div>
-  </div>
+
+    <!-- НИЖНЯЯ ПАНЕЛЬ -->
+    <div class="bottom-section">
+        
+        <!-- ЕДИНАЯ СЕКЦИЯ ФЕЙДЕРОВ (8 каналов) -->
+        <div class="faders-section">
+            <div class="channel-strip">
+                <input type="range" class="vert" id="master1" min="0" max="255" value="0">
+                <button class="pad scene on">Go+<span class="thmb"></span></button>
+            </div>
+            <div class="channel-strip">
+                <input type="range" class="vert" id="master2" min="0" max="255" value="0">
+                <button class="pad scene on">Go-<span class="thmb"></span></button>
+            </div>
+            <div class="channel-strip">
+                <input type="range" class="vert" id="ch1" min="0" max="255" value="0">
+                <button class="pad scene on">1<span class="thmb"></span></button>
+            </div>
+            <div class="channel-strip">
+                <input type="range" class="vert" id="ch2" min="0" max="255" value="0">
+                <button class="pad scene on">2<span class="thmb"></span></button>
+            </div>
+            <div class="channel-strip">
+                <input type="range" class="vert" id="ch3" min="0" max="255" value="0">
+                <button class="pad scene on">3<span class="thmb"></span></button>
+            </div>
+            <div class="channel-strip">
+                <input type="range" class="vert" id="ch4" min="0" max="255" value="0">
+                <button class="pad scene on">4<span class="thmb"></span></button>
+            </div>
+            <div class="channel-strip">
+                <input type="range" class="vert" id="ch5" min="0" max="255" value="0">
+                <button class="pad scene on">5<span class="thmb"></span></button>
+            </div>
+            <div class="channel-strip">
+                <input type="range" class="vert" id="ch6" min="0" max="255" value="0">
+                <button class="pad scene on">6<span class="thmb"></span></button>
+            </div>
+        </div>
+
+        <!-- СЕКЦИЯ КЛАВИАТУРЫ -->
+        <div class="keypad-section">
+            <!-- Ряд 1 -->
+            <button class="pad scene on">7<span class="thmb"></span></button>
+            <button class="pad scene on">8<span class="thmb"></span></button>
+            <button class="pad scene on">9<span class="thmb"></span></button>
+            <button class="pad scene on">+<span class="thmb"></span></button>
+            
+            <!-- Ряд 2 -->
+            <button class="pad scene on">4<span class="thmb"></span></button>
+            <button class="pad scene on">5<span class="thmb"></span></button>
+            <button class="pad scene on">6<span class="thmb"></span></button>
+            <button class="pad scene on">Thru<span class="thmb"></span></button>
+            
+            <!-- Ряд 3 -->
+            <button class="pad scene on">1<span class="thmb"></span></button>
+            <button class="pad scene on">2<span class="thmb"></span></button>
+            <button class="pad scene on">3<span class="thmb"></span></button>
+            <button class="pad scene on">-<span class="thmb"></span></button>
+            
+            <!-- Ряд 4 -->
+            <button class="pad scene on">0<span class="thmb"></span></button>
+            <button class="pad scene on">.<span class="thmb"></span></button>
+            <button class="pad scene on">If<span class="thmb"></span></button>
+            <button class="pad scene on">At<span class="thmb"></span></button>
+            
+            <!-- Ряд 5 (Нижний) -->
+            <div class="store-clear-row">
+                <button class="pad scene on">Store<span class="thmb"></span></button>
+                <button class="pad scene on">Clear<span class="thmb"></span></button>
+            </div>
+            <button class="pad scene on btn-please">Please<span class="thmb"></span></button>
+        </div>
+
+        <!-- СЕКЦИЯ COM КНОПОК -->
+        <div class="com-section">
+            <button class="pad scene on">COM1<span class="thmb"></span></button>
+            <button class="pad scene on">COM2<span class="thmb"></span></button>
+            <button class="pad scene on">COM3<span class="thmb"></span></button>
+            <button class="pad scene on">COM4<span class="thmb"></span></button>
+            <button class="pad scene on">COM5<span class="thmb"></span></button>
+        </div>
+
+    </div>
+
+</div>
 
 <script>
-(function () {
-  var WS = null, wantOpen = true, retry = 0;
-  var CH = [200,201,202,203,204,205,206,207];
-  var dot = document.getElementById('dot');
+    // --- ЛОГИКА ЭКРАНА И ОТСЛЕЖИВАНИЯ ОРГАНОВ УПРАВЛЕНИЯ ---
+    const screenLines = [
+        document.querySelectorAll('.display-line')[0],
+        document.querySelectorAll('.display-line')[1],
+        document.getElementById('line-active')
+    ];
 
-  // ---- сцены (пады) + спец-кнопки; порядок DOM = визуальные ряды сетки ----
-  // Запись сцены: удержание выбранного пада 2.4с -> пад мигает (готовность).
-  // Выставляешь свет фейдерами/колесом, жмёшь тот же пад -> запись состояния
-  // в сцену + быстрый флеш + сброс всех каналов в 0.
-  var scenes = {}, armedPad = null, holdTimer = null, renderPads = null;
-  var HOLD_MS = 2400;
-  function saveScenes() { try { localStorage.setItem('cobScenes', JSON.stringify(scenes)); } catch (e) {} }
-  function loadScenes() {
-    try {
-      var s = JSON.parse(localStorage.getItem('cobScenes') || 'null');
-      if (s && typeof s === 'object') scenes = s;
-    } catch (e) {}
-  }
-  (function () {
-    var pads = document.getElementById('pads');
-    function selectPad(b) {
-      Array.prototype.forEach.call(pads.querySelectorAll('.pad.scene'), function (p) { p.classList.remove('on'); });
-      b.classList.add('on');
+    let logHistory = ["Cmd: Ready", "Cmd: System Init", "Cmd: Console Active"];
+
+    function logToScreen(text) {
+        logHistory.push(text);
+        if (logHistory.length > 3) logHistory.shift();
+        
+        screenLines[0].textContent = logHistory[0] || "";
+        screenLines[1].textContent = logHistory[1] || "";
+        screenLines[2].textContent = logHistory[2] || "";
     }
-    function playScene(b) {
-      var snap = scenes[parseInt(b.textContent, 10)];
-      if (!snap) return;
-      CH.forEach(function (ch) { setFader(ch, Math.round(snap[ch]) || 0); });
-      if (wheelBase) updateWheelMarker();
-      apply();
-    }
-    function renderScene(b) {
-      var snap = scenes[parseInt(b.textContent, 10)];
-      var thmb = b.querySelector('.thmb');
-      if (!thmb) { thmb = document.createElement('span'); thmb.className = 'thmb'; b.appendChild(thmb); }
-      thmb.innerHTML = '';
-      if (!snap) { thmb.classList.remove('has'); return; }
-      var cols = [[201, '#ff5b5b'], [202, '#4ae06a'], [203, '#4a9dff'], [204, '#e8e8f0']];
-      var tot = 0;
-      cols.forEach(function (c) { tot += snap[c[0]] || 0; });
-      if (tot > 0) {
-        cols.forEach(function (c) {
-          var v = snap[c[0]] || 0;
-          if (!v) return;
-          var i = document.createElement('i');
-          i.style.background = c[1];
-          i.style.flex = v;
-          thmb.appendChild(i);
+
+    // Логика работы круглых энкодеров
+    document.querySelectorAll('.encoder-wrapper').forEach((wrapper, index) => {
+        const knob = wrapper.querySelector('.encoder-knob');
+        const input = wrapper.querySelector('.encoder-input');
+        const encId = `Enc ${index + 1}`;
+        
+        let isDragging = false;
+        let startY = 0;
+        let totalMoved = 0;
+        let currentAngle = 0;
+        let startAngle = 0;
+        let val = parseInt(input.value) || 127;
+
+        const updateRotation = (isPressed = false) => {
+            const scale = isPressed ? ' scale(0.96)' : '';
+            knob.style.transform = `rotate(${currentAngle}deg)${scale}`;
+        };
+
+        // Отключаем контекстное меню при правых кликах
+        knob.addEventListener('contextmenu', e => e.preventDefault());
+
+        // Колесико мыши — инкрементальное вращение с кольцевым переходом (0 -> 255 при CCW)
+        knob.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? -5 : 5;
+            currentAngle += delta * 1.5;
+            val = (val + delta) % 256;
+            if (val < 0) val += 256;
+            input.value = val;
+            updateRotation();
+            logToScreen(`${encId}: ${val}`);
         });
-        thmb.classList.add('has');
-      } else thmb.classList.remove('has');
-      var st = b.querySelector('.stb') || (function () {
-        var s = document.createElement('span'); s.className = 'stb'; b.appendChild(s); return s;
-      })();
-      st.classList.toggle('show', (snap[205] || 0) > 0);
-    }
-    function disarmPad() {
-      if (armedPad) armedPad.classList.remove('arm');
-      armedPad = null;
-    }
-    function recordScene(b) {
-      var snap = {};
-      CH.forEach(function (ch) { snap[ch] = getVal(ch); });
-      scenes[parseInt(b.textContent, 10)] = snap;
-      saveScenes();
-      renderScene(b);
-      send_raw(JSON.stringify({ type: 'scene_set', idx: parseInt(b.textContent, 10), snap: snap }));
-      b.classList.add('flash');
-      setTimeout(function () { b.classList.remove('flash'); }, 650);
-      disarmPad();
-      CH.forEach(function (ch) {
-        var el = document.getElementById('ch' + ch);
-        var num = document.getElementById('v' + ch);
-        var btn = document.querySelector('.mini[data-ch="' + ch + '"]');
-        el.value = 0; num.textContent = 0;
-        if (btn) { btn.textContent = 'OFF'; btn.classList.remove('on'); }
-      });
-      if (wheelBase) updateWheelMarker();
-      apply();
-    }
-    function scenePad(n) {
-      var b = document.createElement('button');
-      b.className = 'pad scene'; b.textContent = n;
-      var pressed = false;
-      b.addEventListener('mousedown', function (e) {
-        e.preventDefault();
-        if (this.classList.contains('arm')) { recordScene(this); return; }
-        if (armedPad && armedPad !== this) disarmPad();
-        pressed = true;
-        holdTimer = setTimeout(function () {
-          holdTimer = null; pressed = false;
-          selectPad(b); b.classList.add('arm'); armedPad = b;
-        }, HOLD_MS);
-      });
-      b.addEventListener('mouseup', function () {
-        if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
-        if (pressed) {
-          pressed = false;
-          if (this.classList.contains('arm')) return;
-          var wasOn = this.classList.contains('on');
-          selectPad(this);
-          if (scenes[parseInt(this.textContent, 10)]) playScene(this);
-          else if (wasOn) this.classList.remove('on');
+
+        // Нажатие мышью (ЛКМ, СКМ, ПКМ)
+        knob.addEventListener('mousedown', (e) => {
+            if (e.button === 1 || e.button === 2) {
+                // ПКМ или клик колесом (СКМ) — сброс в 0
+                e.preventDefault();
+                currentAngle = 0;
+                val = 0;
+                input.value = 0;
+                updateRotation();
+                logToScreen(`${encId}: Reset (0)`);
+                return;
+            }
+            if (e.button !== 0) return; // Только ЛКМ для драга/клика
+            isDragging = true;
+            startY = e.clientY;
+            totalMoved = 0;
+            startAngle = currentAngle;
+            knob.classList.add('pressed');
+            updateRotation(true);
+            document.body.style.cursor = 'ns-resize';
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            const deltaY = startY - e.clientY;
+            const step = Math.round(deltaY / 2);
+            totalMoved += Math.abs(deltaY);
+            
+            if (totalMoved >= 3) {
+                currentAngle = startAngle + deltaY * 2;
+                let displayVal = (parseInt(input.value) + step) % 256;
+                if (displayVal < 0) displayVal += 256;
+                logToScreen(`${encId}: ${displayVal}`);
+                updateRotation(true);
+            }
+        });
+
+        window.addEventListener('mouseup', (e) => {
+            if (!isDragging) return;
+            isDragging = false;
+            knob.classList.remove('pressed');
+            updateRotation(false);
+            document.body.style.cursor = 'default';
+
+            // Если не было вращения/перемещения — считаем это кликом при отпускании ЛКМ
+            if (totalMoved < 3) {
+                logToScreen(`${encId}: Click`);
+            } else {
+                // Зафиксировать итоговое значение после вращения
+                const deltaY = startY - e.clientY;
+                let finalVal = (parseInt(input.value) + Math.round(deltaY / 2)) % 256;
+                if (finalVal < 0) finalVal += 256;
+                val = finalVal;
+                input.value = finalVal;
+            }
+        });
+
+        updateRotation();
+    });
+
+    // Слушатели кнопок
+    document.querySelectorAll('button.pad').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const label = btn.innerText.trim();
+            logToScreen(`Cmd: Btn [${label}]`);
+        });
+    });
+
+    // Слушатели фейдеров (drag + mouse wheel + reset on RMB/MMB)
+    document.querySelectorAll('.vert').forEach((fader) => {
+        fader.addEventListener('input', () => {
+            const id = fader.id;
+            const val = fader.value;
+            logToScreen(`Fader ${id}: ${val}`);
+        });
+
+        fader.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            let val = parseInt(fader.value) || 0;
+            val += e.deltaY > 0 ? -5 : 5;
+            val = Math.max(0, Math.min(255, val));
+            fader.value = val;
+            logToScreen(`Fader ${fader.id}: ${val}`);
+        });
+
+        // Сброс фейдера при ПКМ или клике колесом (СКМ)
+        fader.addEventListener('mousedown', (e) => {
+            if (e.button === 1 || e.button === 2) {
+                e.preventDefault();
+                fader.value = 0;
+                logToScreen(`Fader ${fader.id}: Reset (0)`);
+            }
+        });
+        fader.addEventListener('contextmenu', e => e.preventDefault());
+    });
+
+    // Блокировка контекстного меню (ПКМ) и выделения текста на всей странице
+    document.addEventListener('contextmenu', e => e.preventDefault());
+    document.addEventListener('selectstart', e => e.preventDefault());
+    document.addEventListener('dragstart', e => e.preventDefault());
+
+    // --- ЛОГИКА ВЫПАДАЮЩИХ МЕНЮ И НАСТРОЕК ---
+    const menuBtn = document.getElementById('menu-btn');
+    const dropdownMenu = document.getElementById('dropdown-menu');
+    const menuClose = document.getElementById('menu-close');
+    const selectDmx = document.getElementById('select-dmx');
+    const selectScenes = document.getElementById('select-scenes');
+
+    const settingsBtn = document.getElementById('settings-btn');
+    const settingsMenu = document.getElementById('settings-menu');
+    const settingsClose = document.getElementById('settings-close');
+    const selectTheme = document.getElementById('select-theme');
+    const selectShape = document.getElementById('select-shape');
+    const selectDimpleGlow = document.getElementById('select-dimple-glow');
+
+    // Открытие Меню Роутинга
+    menuBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        settingsMenu.classList.remove('open');
+        dropdownMenu.classList.toggle('open');
+        logToScreen("Menu: Preset Window");
+    });
+
+    menuClose.addEventListener('click', () => {
+        dropdownMenu.classList.remove('open');
+    });
+
+    // Открытие Настроек (Шестеренка)
+    settingsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dropdownMenu.classList.remove('open');
+        settingsMenu.classList.toggle('open');
+        logToScreen("Settings: Open UI Setup");
+    });
+
+    settingsClose.addEventListener('click', () => {
+        settingsMenu.classList.remove('open');
+    });
+
+    dropdownMenu.addEventListener('click', (e) => e.stopPropagation());
+    settingsMenu.addEventListener('click', (e) => e.stopPropagation());
+
+    document.addEventListener('click', () => {
+        dropdownMenu.classList.remove('open');
+        settingsMenu.classList.remove('open');
+    });
+
+    selectDmx.addEventListener('change', (e) => {
+        logToScreen(`DMX: ${e.target.value}`);
+    });
+
+    selectScenes.addEventListener('change', (e) => {
+        logToScreen(`Map: ${e.target.value}`);
+    });
+
+    // Смена цветовых тем (Палитры)
+    selectTheme.addEventListener('change', (e) => {
+        const theme = e.target.value;
+        document.body.classList.remove('theme-gold', 'theme-cyan', 'theme-green', 'theme-mono', 'theme-white');
+        document.body.classList.add(theme);
+        logToScreen(`Theme: ${e.target.options[e.target.selectedIndex].text}`);
+    });
+
+    // Смена дизайна кнопок
+    selectShape.addEventListener('change', (e) => {
+        const shape = e.target.value;
+        document.body.classList.remove('btn-shape-flat');
+        if (shape !== 'btn-shape-default') {
+            document.body.classList.add(shape);
         }
-      });
-      return b;
-    }
-    var rb = document.createElement('button');
-    rb.className = 'pad rainbow'; rb.id = 'rainbowBtn'; rb.title = 'RGBW палитра';
-    var fb = document.createElement('button');
-    fb.className = 'pad fade'; fb.id = 'fadeBtn'; fb.title = 'Fade — плавное переключение сцен';
-    fb.innerHTML = '<span class="lbl off">OFF</span><span class="lbl on">ON</span><span class="sw-knob"></span>';
-    var bb = document.createElement('button');
-    bb.className = 'pad bo'; bb.id = 'blackoutBtn'; bb.title = 'BlackOut (NUM0 / Ins)';
-    bb.textContent = 'BOUT';
-    // ряды: 1 2 3 4 Колесо / 5 6 7 8 FADE / 9 10 11 12 BOUT
-    [1, 2, 3, 4, rb, 5, 6, 7, 8, fb, 9, 10, 11, 12, bb].forEach(function (x) {
-      pads.appendChild(typeof x === 'number' ? scenePad(x) : x);
+        logToScreen(`Shape: ${e.target.options[e.target.selectedIndex].text}`);
     });
-    loadScenes();
-    renderPads = function () {
-      Array.prototype.forEach.call(pads.querySelectorAll('.pad.scene'), function (p) { renderScene(p); });
-    };
-    renderPads();
-  })();
-
-  // ---- шаблоны сцен (общие для всех устройств, хранилище на сервере) ----
-  var tplSelect = document.getElementById('tplSelect');
-  var tplAdd = document.getElementById('tplAdd');
-  function fillTpl(payload) {
-    var names = Object.keys(payload.templates || {});
-    tplSelect.innerHTML = '';
-    if (!names.length) {
-      var o = document.createElement('option');
-      o.value = ''; o.textContent = '— без шаблона —';
-      tplSelect.appendChild(o);
-      tplSelect.value = '';
-      return;
-    }
-    names.forEach(function (n) {
-      var opt = document.createElement('option');
-      opt.value = n; opt.textContent = n;
-      tplSelect.appendChild(opt);
-    });
-    var cur = String(payload.active || names[0]);
-    tplSelect.value = names.indexOf(cur) >= 0 ? cur : names[0];
-  }
-  tplSelect.addEventListener('change', function () {
-    send_raw(JSON.stringify({ type: 'tpl_load', name: this.value }));
-  });
-  tplAdd.addEventListener('click', function () {
-    var name = window.prompt('Название шаблона (мероприятие / оператор):');
-    name = (name || '').trim();
-    if (!name) return;
-    send_raw(JSON.stringify({ type: 'tpl_save', name: name }));
-  });
-
-  function host() { return location.hostname || '127.0.0.1'; }
-  function connect() {
-    try { WS = new WebSocket('ws://' + host() + ':8000/ws'); }
-    catch (e) { dot.className = 'dot'; setTimeout(tryReconnect, 2000); return; }
-    WS.onopen = function () {
-      dot.className = 'dot on'; retry = 0;
-      apply();
-    };
-    WS.onclose = function () { dot.className = 'dot'; WS = null; tryReconnect(); };
-    WS.onerror = function () { dot.className = 'dot'; };
-    WS.onmessage = function (ev) {
-      try { var d = JSON.parse(ev.data); } catch (e) { return; }
-      if (!d || !d.type) return;
-      if (d.type === 'scene_store' && d.payload && d.payload.templates) {
-        var active = d.payload.active || '';
-        scenes = d.payload.templates[active] || {};
-        fillTpl(d.payload);
-        if (renderPads) renderPads();
-      } else if (d.type === 'wing_input' && d.payload && d.payload.kind === 'fader') {
-        wingFaderTo(d.payload.id, d.payload.value);
-      } else if (d.type === 'wing_levels' && Array.isArray(d.payload)) {
-        d.payload.forEach(function (v, i) { wingFaderTo(i + 1, v); });
-      }
-    };
-  }
-  function tryReconnect() {
-    if (!wantOpen) return;
-    retry = Math.min(retry + 1, 10);
-    setTimeout(connect, 800 * retry);
-  }
-  function send_raw(s) { if (WS && WS.readyState === 1) WS.send(s); }
-  function getVal(ch) { return parseInt(document.getElementById('ch' + ch).value, 10) || 0; }
-
-// Диммер (200) = яркость: масштабирует цвета (201-204) и ченджер (206/207).
-  // Строб (205) - мерцание поверх, передаётся как есть (диммер его не гасит).
-  // Ченджер масштабируется диммером: диммер 0 -> ченджер 0 (режимы смены
-  // цветов выключаются вместе со светом). Даташит CH7: 0-50 A2, 51-90 A3,
-  // 91-130 A4, 131-210 A3/A4 (выше = быстрее), 211-255 Voice control.
-  function apply() {
-    var dim = getVal(200) / 255;
-    CH.forEach(function (ch) {
-      var v;
-      if (blackout) v = 0;                                // BlackOut: всё в 0
-      else if (ch === 200) v = getVal(200);               // диммер
-      else if (ch === 205) v = getVal(ch);                // строб напрямую
-      else v = Math.round(getVal(ch) * dim);              // цвета/ченджер диммером
-      send_raw(JSON.stringify({ ch: ch, val: v }));
-    });
-  }
-
-  // Ручное изменение цвета (фейдеры RGBW / колесо / HEX) снимает приоритет
-  // ченджера: ch206 -> 0 (кнопка OFF), иначе режим прибора перебьёт цвет.
-  function cancelChanger() {
-    var el = document.getElementById('ch206');
-    var num = document.getElementById('v206');
-    var btn = document.querySelector('.mini[data-ch="206"]');
-    el.value = 0; num.textContent = '0';
-    if (btn) { btn.textContent = 'OFF'; btn.classList.remove('on'); }
-  }
-
-  // Обратная связь от крыла grandMA: фейдер N крыла -> канал COB.
-  // Физическая раскладка (задал юзер 07.08): 1=димер200, 2=строб205,
-  // 3/4=— , 5=W204, 6=R201, 7=G202, 8=B203. Движение ведёт слайдер панели + DMX.
-  var WING_MAP = { 1: 200, 2: 205, 3: 0, 4: 0, 5: 204, 6: 201, 7: 202, 8: 203 };
-  function wingFaderTo(id, value) {
-    var ch = WING_MAP[id];
-    if (!ch) return;
-    var v = Math.max(0, Math.min(255, Math.round(value)));
-    setFader(ch, v);
-    if (ch >= 201 && ch <= 204) cancelChanger();   // цвет с крыла снимает ченджер
-    apply();
-  }
-
-  // ручной ввод значения: двойной клик по числу -> поле (только цифры 0-255)
-  function makeEditable(ch) {
-    var el = document.getElementById('ch' + ch);
-    var num = document.getElementById('v' + ch);
-    var btn = document.querySelector('.mini[data-ch="' + ch + '"]');
-    num.addEventListener('dblclick', function (e) {
-      if (num.querySelector('input')) return;
-      var inp = document.createElement('input');
-      inp.type = 'text'; inp.maxLength = 3;
-      inp.value = parseInt(num.textContent, 10) || 0;
-      num.textContent = ''; num.appendChild(inp); inp.focus(); inp.select();
-      var done = false;
-      function commit() {
-        if (done) return; done = true;
-        var v = parseInt(inp.value, 10);
-        if (isNaN(v)) v = 0;
-        v = Math.max(0, Math.min(255, v));
-        num.textContent = v;
-        el.value = v;
-        if (btn) {
-          btn.textContent = v > 0 ? 'ON' : 'OFF';
-          btn.classList.toggle('on', v > 0);
+    // Переключение свечения точек энкодера
+    selectDimpleGlow.addEventListener('change', (e) => {
+        if (e.target.checked) {
+            document.body.classList.add('dimple-glow');
+        } else {
+            document.body.classList.remove('dimple-glow');
         }
-        if (ch >= 201 && ch <= 204) cancelChanger();   // ручной цвет отменяет ченджер
-        apply();
-      }
-      function cancel() { if (!done) { done = true; num.textContent = parseInt(el.value, 10) || 0; } }
-      inp.addEventListener('keydown', function (ev) {
-        if (ev.key === 'Enter') commit();
-        else if (ev.key === 'Escape') cancel();
-      });
-      inp.addEventListener('blur', commit);
-      inp.addEventListener('input', function () { inp.value = inp.value.replace(/\D/g, ''); });
-      e.stopPropagation();
+        logToScreen(`Dimple Glow: ${e.target.checked ? 'On' : 'Off'}`);
     });
-  }
-  CH.forEach(makeEditable);
-
-  // фейдеры -> Lumina + подпись значения
-  CH.forEach(function (ch) {
-    var el = document.getElementById('ch' + ch);
-    var num = document.getElementById('v' + ch);
-    var btn = document.querySelector('.mini[data-ch="' + ch + '"]');
-    el.addEventListener('input', function () {
-      var v = parseInt(el.value, 10); num.textContent = v;
-      if (btn) {
-        btn.textContent = v > 0 ? 'ON' : 'OFF';
-        btn.classList.toggle('on', v > 0);
-      }
-      if (ch >= 201 && ch <= 204) cancelChanger();   // ручной цвет отменяет ченджер
-      if (wheelBase) updateWheelMarker();
-      apply();
-    });
-  });
-
-  // BlackOut: гасит всё, повторный клик возвращает прежние значения.
-  // Горячие клавиши: Numpad0 (NUM-0) и Insert (если NUM выключен).
-  var blackout = false;
-  function toggleBlackout() {
-    blackout = !blackout;
-    document.getElementById('blackoutBtn').classList.toggle('on', blackout);
-    apply();
-  }
-  document.getElementById('blackoutBtn').onclick = function () { toggleBlackout(); };
-  // Fade: тумблер плавного переключения сцен (логика подключится со сценами)
-  var fade = false;
-  document.getElementById('fadeBtn').onclick = function () {
-    fade = !fade;
-    this.classList.toggle('on', fade);
-  };
-  document.addEventListener('keydown', function (e) {
-    var tag = (document.activeElement || {}).tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA') return;   // не мешаем ручному вводу
-    if (e.code === 'Numpad0' || e.code === 'Insert' || e.key === 'Insert') {
-      e.preventDefault();
-      toggleBlackout();
-    }
-  });
-
-// Свитч на каждый канал: 0 -> ON (255, строб 191=75%), повтор -> 0 (OFF).
-  // Ченджер (206) — такая же кнопка ON/OFF (255/0), простой клик переключает.
-  Array.prototype.forEach.call(document.querySelectorAll('.mini[data-ch]'), function (btn) {
-    btn.addEventListener('click', function () {
-      var ch = parseInt(btn.getAttribute('data-ch'), 10);
-      var el = document.getElementById('ch' + ch);
-      var cur = parseInt(el.value, 10);
-      var v = cur > 0 ? 0 : (ch === 205 ? 191 : 255);
-      el.value = v;
-      document.getElementById('v' + ch).textContent = v;
-      btn.textContent = v > 0 ? 'ON' : 'OFF';
-      btn.classList.toggle('on', v > 0);
-      apply();
-    });
-  });
-
-  // сворачивание
-  document.getElementById('collapseBtn').onclick = function () {
-    var b = document.getElementById('panelBody');
-    var hidden = b.classList.toggle('hidden');
-    document.getElementById('collapseBtn').textContent = hidden ? '+' : '–';
-    saveState();
-  };
-
-  // всплывающая подсказка по [i]
-  (function () {
-    var tip = document.getElementById('tip');
-    var btn = document.getElementById('infoBtn');
-    btn.onclick = function (e) {
-      tip.classList.toggle('show');
-      e.stopPropagation();
-    };
-    document.addEventListener('click', function () { tip.classList.remove('show'); });
-    tip.addEventListener('click', function (e) { e.stopPropagation(); });
-  })();
-
-  // перетаскивание
-  (function () {
-    var panel = document.getElementById('panel');
-    var head = document.getElementById('panelHead');
-    var sx = 0, sy = 0, ox = 0, oy = 0, drag = false;
-    head.addEventListener('mousedown', function (e) {
-      drag = true; sx = e.clientX; sy = e.clientY;
-      ox = panel.offsetLeft; oy = panel.offsetTop;
-      e.preventDefault();
-    });
-    document.addEventListener('mousemove', function (e) {
-      if (!drag) return;
-      var x = ox + e.clientX - sx, y = oy + e.clientY - sy;
-      x = Math.max(0, Math.min(window.innerWidth - panel.offsetWidth, x));
-      y = Math.max(0, Math.min(window.innerHeight - 30, y));
-      panel.style.left = x + 'px'; panel.style.top = y + 'px';
-    });
-    document.addEventListener('mouseup', function () { drag = false; saveState(); });
-  })();
-
-  function saveState() {
-    try {
-      var panel = document.getElementById('panel');
-      localStorage.setItem('cobPanel', JSON.stringify({
-        x: panel.offsetLeft, y: panel.offsetTop,
-        hidden: document.getElementById('panelBody').classList.contains('hidden')
-      }));
-    } catch (e) {}
-  }
-  function loadState() {
-    try {
-      var s = JSON.parse(localStorage.getItem('cobPanel') || 'null');
-      if (s) {
-        var panel = document.getElementById('panel');
-        panel.style.left = s.x + 'px'; panel.style.top = s.y + 'px';
-        if (s.hidden) {
-          document.getElementById('panelBody').classList.add('hidden');
-          document.getElementById('collapseBtn').textContent = '+';
-        }
-      }
-    } catch (e) {}
-  }
-
-  // ---- RGBW-колесо ----
-  var wheelBase = null;
-  function hsv2rgb(h, s, v) {
-    var c = v * s, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = v - c, r, g, b;
-    if (h < 60) { r = c; g = x; b = 0; }
-    else if (h < 120) { r = x; g = c; b = 0; }
-    else if (h < 180) { r = 0; g = c; b = x; }
-    else if (h < 240) { r = 0; g = x; b = c; }
-    else if (h < 300) { r = x; g = 0; b = c; }
-    else { r = c; g = 0; b = x; }
-    return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
-  }
-  function rgb2hex(r, g, b) {
-    function h(n) { return ('0' + n.toString(16)).slice(-2); }
-    return h(r) + h(g) + h(b);
-  }
-  function hueOf(r, g, b) {
-    var mx = Math.max(r, g, b), mn = Math.min(r, g, b);
-    if (mx === mn) return 0;
-    var d = mx - mn, hue;
-    if (mx === r) hue = ((g - b) / d + (g < b ? 6 : 0)) * 60;
-    else if (mx === g) hue = ((b - r) / d + 2) * 60;
-    else hue = ((r - g) / d + 4) * 60;
-    return hue;
-  }
-  // обратная связь: маркер/HEX показывают текущее состояние фейдеров
-  function updateWheelMarker() {
-    var r = getVal(201), g = getVal(202), b = getVal(203);
-    var hue = hueOf(r, g, b);
-    var bright = (r === 0 && g === 0 && b === 0) ? 0 : getVal(200) / 255;
-    drawMarker(hue, bright);
-    hexInput.value = rgb2hex(r, g, b);
-  }
-  function drawWheel() {
-    var cv = document.getElementById('wheel');
-    var ctx = cv.getContext('2d');
-    var cx = cv.width / 2, cy = cv.height / 2, R = cx - 4;
-    var img = ctx.createImageData(cv.width, cv.height);
-    var d = img.data;
-    for (var y = 0; y < cv.height; y++) {
-      for (var x = 0; x < cv.width; x++) {
-        var dx = x - cx, dy = y - cy, r = Math.sqrt(dx * dx + dy * dy);
-        var i = (y * cv.width + x) * 4;
-        if (r > R) { d[i + 3] = 0; continue; }
-        var hue = Math.atan2(dy, dx) * 180 / Math.PI;
-        if (hue < 0) hue += 360;
-        var c = hsv2rgb(hue, 1, r / R);   // чёрный в центре, чистый цвет на краю
-        d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2]; d[i + 3] = 255;
-      }
-    }
-    ctx.putImageData(img, 0, 0);
-    wheelBase = ctx.getImageData(0, 0, cv.width, cv.height);
-  }
-  function drawMarker(hue, bright) {
-    var cv = document.getElementById('wheel');
-    var ctx = cv.getContext('2d');
-    ctx.putImageData(wheelBase, 0, 0);
-    var cx = cv.width / 2, cy = cv.height / 2, R = cx - 4;
-    var rad = (R - 7) * Math.max(0.02, Math.min(1, bright));
-    var ang = hue * Math.PI / 180;
-    var x = cx + rad * Math.cos(ang), y = cy + rad * Math.sin(ang);
-    ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2);
-    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
-    ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2);
-    ctx.fillStyle = '#fff'; ctx.fill();
-  }
-function setFader(ch, v) {
-    var el = document.getElementById('ch' + ch);
-    var num = document.getElementById('v' + ch);
-    el.value = v; num.textContent = v;
-    var btn = document.querySelector('.mini[data-ch="' + ch + '"]');
-    if (btn) { btn.textContent = v > 0 ? 'ON' : 'OFF'; btn.classList.toggle('on', v > 0); }
-  }
-  var modal = document.getElementById('rainbowModal');
-  var rmodal = modal.querySelector('.rmodal');
-  var hexInput = document.getElementById('hexInput');
-  document.getElementById('rainbowBtn').onclick = function () {
-    if (!rmodal.style.left) {
-      rmodal.style.position = 'fixed'; rmodal.style.margin = '0';
-      rmodal.style.left = Math.round((window.innerWidth - 276) / 2) + 'px';
-      rmodal.style.top = Math.round((window.innerHeight - 320) / 2) + 'px';
-    }
-    modal.classList.add('open');
-    if (!wheelBase) drawWheel();
-    updateWheelMarker();
-  };
-  document.getElementById('rmClose').onclick = function () { modal.classList.remove('open'); };
-  document.getElementById('rmMin').onclick = function () { rmodal.classList.toggle('min'); };
-
-  // перетаскивание окна за заголовок
-  (function () {
-    var head = rmodal.querySelector('.rm-head'), dragging = false;
-    head.addEventListener('mousedown', function (e) {
-      if (e.target.tagName === 'BUTTON') return;
-      dragging = true;
-      var r = rmodal.getBoundingClientRect();
-      rmodal.style.position = 'fixed';
-      rmodal.style.left = r.left + 'px';
-      rmodal.style.top = r.top + 'px';
-      rmodal.style.margin = '0';
-      rmodal._dx = e.clientX - r.left; rmodal._dy = e.clientY - r.top;
-      e.preventDefault();
-    });
-    document.addEventListener('mousemove', function (e) {
-      if (!dragging) return;
-      rmodal.style.left = (e.clientX - rmodal._dx) + 'px';
-      rmodal.style.top = (e.clientY - rmodal._dy) + 'px';
-    });
-    document.addEventListener('mouseup', function () { dragging = false; });
-  })();
-
-  // выбор цвета "без отрыва": зажал ЛКМ на колесе и водишь
-  function pickColor(e) {
-    var cv = document.getElementById('wheel');
-    var rect = cv.getBoundingClientRect();
-    var x = e.clientX - rect.left, y = e.clientY - rect.top;
-    var cx = cv.width / 2, cy = cv.height / 2, R = cx - 4;
-    var dx = x - cx, dy = y - cy, r = Math.sqrt(dx * dx + dy * dy);
-    if (r > R) return;
-    var hue = Math.atan2(dy, dx) * 180 / Math.PI;
-    if (hue < 0) hue += 360;
-    var bright = r / R;
-    var c = hsv2rgb(hue, 1, 1);
-    setFader(201, c[0]); setFader(202, c[1]); setFader(203, c[2]); setFader(204, 0);
-    setFader(200, Math.round(bright * 255));           // диммер = светлота от центра
-hexInput.value = rgb2hex(c[0], c[1], c[2]);
-    cancelChanger();
-    drawMarker(hue, bright);
-    apply();
-  }
-  var wheel = document.getElementById('wheel'), picking = false;
-  wheel.addEventListener('mousedown', function (e) { picking = true; pickColor(e); e.preventDefault(); });
-  document.addEventListener('mousemove', function (e) { if (picking) pickColor(e); });
-  document.addEventListener('mouseup', function () { picking = false; });
-  hexInput.addEventListener('input', function () {
-    this.value = this.value.replace(/[^0-9a-fA-F]/g, '').toUpperCase().slice(0, 6);
-  });
-  hexInput.addEventListener('keydown', function (e) {
-    if (e.key !== 'Enter') return;
-    var h = this.value.trim().replace(/^#/, '');
-    if (!/^([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(h)) return;
-    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
-    var r = parseInt(h.substr(0, 2), 16), g = parseInt(h.substr(2, 2), 16), b = parseInt(h.substr(4, 2), 16);
-    var mx = Math.max(r, g, b), mn = Math.min(r, g, b), hue = hueOf(r, g, b);
-    if (mx === mn) { setFader(204, mx); setFader(201, 0); setFader(202, 0); setFader(203, 0); }
-    else { setFader(204, 0); setFader(201, r); setFader(202, g); setFader(203, b); }
-    setFader(200, mx);                                    // диммер = светлота
-    cancelChanger();
-    apply();
-    drawMarker(hue, mx / 255);
-  });
-
-  loadState();
-  connect();
-  window.addEventListener('beforeunload', function () { wantOpen = false; if (WS) WS.close(); });
-})();
 </script>
+
+<style>
+    /* --- WS-связка: доп. стейты сцен (не конфликтуют с механиками дизайна) --- */
+    .pad.ws-arm { outline: 2px solid var(--amber, #ffb454); outline-offset: -2px; }
+    .pad.ws-flash { animation: wsflash 0.55s ease-out; }
+    @keyframes wsflash { 0% { filter: brightness(2.5); } 100% { filter: none; } }
+    .pad .thmb.thmb-has { display: flex; }
+    .pad .thmb i { flex: 1; align-self: stretch; display: block; }
+</style>
+
+<script>
+    // --- WS-СВЯЗКА К СЕРВЕРУ LUMINA (аддитивный слой; механики дизайна не тронуты) ---
+    (function () {
+        'use strict';
+        var WS = null, wantOpen = true, retry = 0;
+        var blackout = false;
+        var waveOn = true;
+        var waveToggle = document.getElementById('select-wing-wave');
+        if (waveToggle) waveToggle.addEventListener('change', function () { waveOn = waveToggle.checked; });
+        var curScene = -1, lastDigit = -1;
+        var armedPad = null, holdTimer = null, HOLD_MS = 2400;
+        var encLast = [0, 0, 0, 0];
+        var scenes = {};
+
+        // Каналы: master1=200 Диммер, master2=205 Строб, ch1=204 W, ch2=201 R, ch3=202 G, ch4=203 B, ch5=206 Ченджер, ch6=207 Скорость
+        var CHS = { master1: 200, master2: 205, ch1: 204, ch2: 201, ch3: 202, ch4: 203, ch5: 206, ch6: 207 };
+        var WING_MAP = { 1: 200, 2: 205, 3: 204, 4: 201, 5: 202, 6: 203, 7: 206, 8: 207 };
+        var ENC_CH = [41, 42, 43, 44];
+        var BAR = { 201: '#ff5b5b', 202: '#4ae06a', 203: '#4a9dff', 204: '#e8e8f0' };
+
+        window.__wsPanel = {
+            connected: function () { return !!(WS && WS.readyState === 1); },
+            state: function () { return blackout; },
+            waveOn: function () { return waveOn; },
+            waveFrom: function (b) { waveFrom(b); }
+        };
+
+        function el(id) { return document.getElementById(id); }
+        function log(t) { try { logToScreen(t); } catch (e) {} }
+        function send_raw(s) { if (WS && WS.readyState === 1) WS.send(s); }
+        function idToCh(id) { return CHS[id]; }
+        function chToId(ch) { for (var k in CHS) { if (CHS[k] === ch) return k; } return null; }
+        function rawOf(ch) { var id = chToId(ch), e = id ? el(id) : null; return e ? (parseInt(e.value, 10) || 0) : 0; }
+        function setRaw(ch, v) { var id = chToId(ch), e = id ? el(id) : null; if (e) e.value = v; }
+        function dimOf() { return rawOf(200); }
+
+        function scaleOut(ch, raw) {
+            if (blackout) return 0;
+            if (ch === 200 || ch === 205) return raw;
+            return Math.round(raw * dimOf() / 255);
+        }
+        function sendChan(ch) { send_raw(JSON.stringify({ ch: ch, val: scaleOut(ch, rawOf(ch)) })); }
+        function apply() {
+            for (var k in CHS) sendChan(CHS[k]);
+        }
+
+        // --- Фейдеры: драг / колесо / сброс ПКМ (чтение ПОСЛЕ дизайн-хендлеров) ---
+        document.querySelectorAll('.vert').forEach(function (fader) {
+            fader.addEventListener('input', function () {
+                var ch = idToCh(fader.id);
+                if (ch === 200) apply(); else sendChan(ch);
+            });
+            fader.addEventListener('wheel', function () {
+                sendChan(idToCh(fader.id));
+            });
+            fader.addEventListener('mousedown', function (e) {
+                if (e.button === 1 || e.button === 2) sendChan(idToCh(fader.id));
+            });
+        });
+
+        // --- Энкодеры -> каналы 41-44 (только отправка, без обратной связи) ---
+        document.querySelectorAll('.encoder-wrapper').forEach(function (wrapper, idx) {
+            var knob = wrapper.querySelector('.encoder-knob');
+            var input = wrapper.querySelector('.encoder-input');
+            function pushEnc() {
+                var v = parseInt(input.value, 10) || 0;
+                if (v === encLast[idx]) return;
+                encLast[idx] = v;
+                send_raw(JSON.stringify({ ch: ENC_CH[idx], val: v }));
+            }
+            knob.addEventListener('wheel', pushEnc);
+            knob.addEventListener('mousedown', function (e) {
+                if (e.button === 1 || e.button === 2) pushEnc();
+            });
+            window.addEventListener('mouseup', pushEnc);
+        });
+
+        // --- Сцены: цифровые пады (клик=играть, удержание 2.4с=запись) ---
+        function disarm() {
+            if (armedPad) armedPad.classList.remove('ws-arm');
+            armedPad = null;
+            if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+        }
+        function renderThumbs() {
+            document.querySelectorAll('button.pad').forEach(function (b) {
+                var t = parseInt(b.innerText.trim(), 10);
+                if (isNaN(t)) { var g = b.querySelector('.thmb'); if (g) g.classList.remove('thmb-has'); return; }
+                var snap = scenes[t] || null;
+                var thmb = b.querySelector('.thmb');
+                if (!thmb) return;
+                thmb.innerHTML = '';
+                if (!snap) { thmb.classList.remove('thmb-has'); return; }
+                var tot = 0;
+                [201, 202, 203, 204].forEach(function (ch) { tot += snap[ch] || 0; });
+                if (!tot) { thmb.classList.remove('thmb-has'); return; }
+                [201, 202, 203, 204].forEach(function (ch) {
+                    var v = snap[ch] || 0;
+                    if (!v) return;
+                    var i = document.createElement('i');
+                    i.style.background = BAR[ch];
+                    i.style.flex = v;
+                    thmb.appendChild(i);
+                });
+                thmb.classList.add('thmb-has');
+            });
+        }
+        function flashPad(b) {
+            b.classList.remove('ws-flash');
+            void b.offsetWidth;
+            b.classList.add('ws-flash');
+        }
+        function playScene(n) {
+            curScene = n; lastDigit = n;
+            var snap = scenes[n];
+            if (!snap) { log('Scene ' + n + ': empty'); renderThumbs(); return; }
+            for (var k in CHS) setRaw(CHS[k], snap[CHS[k]] || 0);
+            apply();
+            log('Scene ' + n + ': play');
+            renderThumbs();
+        }
+        function recordScene(n) {
+            try {
+                var snap = {};
+                for (var k in CHS) snap[CHS[k]] = parseInt(el(k).value, 10) || 0;
+                scenes[n] = snap;
+                send_raw(JSON.stringify({ type: 'scene_set', idx: n, snap: snap }));
+                for (var k2 in CHS) el(k2).value = 0;
+                apply();
+                disarm();
+                flashPad(document.querySelectorAll('button.pad')[0]);
+                log('Scene ' + n + ': stored');
+                renderThumbs();
+            } catch (e) {
+                log('RECORD_ERR: ' + e.message);
+            }
+        }
+        function armPad(b) {
+            armedPad = b;
+            b.classList.add('ws-arm');
+            log('Store: armed, press again');
+        }
+
+        document.querySelectorAll('button.pad').forEach(function (b) {
+            var label = b.innerText.trim();
+            var n = parseInt(label, 10);
+            if (!isNaN(n) && label.indexOf('.') < 0) {
+                b.addEventListener('mousedown', function (e) {
+                    if (e.button !== 0) return;
+                    if (holdTimer) clearTimeout(holdTimer);
+                    holdTimer = setTimeout(function () { armPad(b); }, HOLD_MS);
+                });
+                b.addEventListener('mouseup', function () {
+                    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+                });
+                b.addEventListener('click', function () {
+                    if (armedPad && armedPad === b) { recordScene(n); return; }
+                    if (armedPad) disarm();
+                    playScene(n);
+                });
+            } else if (label === 'Go+') {
+                b.addEventListener('click', function () { playScene((curScene + 1) % 10); });
+            } else if (label === 'Go-') {
+                b.addEventListener('click', function () { playScene((curScene + 9) % 10); });
+            } else if (label === 'Store') {
+                b.addEventListener('click', function () {
+                    if (armedPad) {
+                        var na = parseInt(armedPad.innerText.trim(), 10);
+                        if (!isNaN(na)) recordScene(na);
+                    } else log('Store: nothing armed');
+                });
+            } else if (label === 'Clear') {
+                b.addEventListener('click', function () {
+                    for (var k in CHS) el(k).value = 0;
+                    apply();
+                    disarm();
+                    log('Clear: faders 0');
+                });
+            } else if (label === 'Please') {
+                b.addEventListener('click', function () { if (lastDigit >= 0) playScene(lastDigit); });
+            }
+        });
+
+        // --- Blackout: иконка B (видна в теме dimple-glow) + клавиши Numpad0/Insert ---
+        function toggleBlackout() {
+            blackout = !blackout;
+            var bi = el('blackout-indicator');
+            if (bi) bi.classList.toggle('blinking', blackout);
+            send_raw(JSON.stringify({ type: 'blackout', set: blackout ? 1 : 0 }));
+            log('Blackout: ' + (blackout ? 'ON' : 'OFF'));
+        }
+        var biEl = el('blackout-indicator');
+        if (biEl) biEl.addEventListener('click', toggleBlackout);
+        document.addEventListener('keydown', function (e) {
+            var t = e.target;
+            if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+            if (e.key === 'Insert' || e.code === 'Numpad0') { e.preventDefault(); toggleBlackout(); return; }
+            var d = parseInt(e.key, 10);
+            if (!isNaN(d) && d >= 0 && d <= 9) { playScene(d); }
+        });
+
+        // --- Меню: роутинг (select-dmx) и шаблоны (select-scenes) ---
+        function fillSel(sel, names, active) {
+            if (!names || !names.length) return;
+            var keep = sel.value;
+            sel.innerHTML = '';
+            names.forEach(function (nm) {
+                var o = document.createElement('option');
+                o.value = nm; o.textContent = nm;
+                sel.appendChild(o);
+            });
+            sel.value = (active && names.indexOf(active) >= 0) ? active : keep;
+        }
+        function fillScenes(payload) {
+            var templates = (payload && payload.templates) ? payload.templates : {};
+            fillSel(el('select-scenes'), Object.keys(templates), payload.active);
+        }
+        function fillRoutes(payload) {
+            var presets = (payload && payload.presets) ? payload.presets : {};
+            fillSel(el('select-dmx'), Object.keys(presets), payload.active);
+        }
+        el('select-dmx').addEventListener('change', function (e) {
+            send_raw(JSON.stringify({ type: 'route_load', name: e.target.value }));
+            log('Route: ' + e.target.value);
+        });
+        el('select-scenes').addEventListener('change', function (e) {
+            send_raw(JSON.stringify({ type: 'tpl_load', name: e.target.value }));
+            log('Template: ' + e.target.value);
+        });
+
+        // --- Обратная связь крыла ---
+        function wingFaderTo(id, v) {
+            var ch = WING_MAP[id];
+            if (!ch) return;
+            setRaw(ch, Math.max(0, Math.min(255, parseInt(v, 10) || 0)));
+        }
+
+        // Физические кнопки крыла -> кнопки панели (сбор 13.08, полный):
+        // keypad-цифры: 66=0 58=1 59=2 60=3 50=4 51=5 52=6 42=7 43=8 44=9;
+        // функции: 126=Go+ 119=Go- 64=Store 57=Clear 70=Please 45=+ 53=Thru
+        // 61=- 69=At 68=If (нижняя клавиатура); верхний ряд сцен 1-6:
+        // 112=1 113=2 114=3 115=4 116=5 117=6 (пады под фейдерами);
+        // 67=квадрат(■) = точка '.'; 118=Pause = blackout (иконка B в хедере).
+        var HW_MAP = {
+            126: { l: 'Go+', s: 'faders' }, 119: { l: 'Go-', s: 'faders' },
+            64: { l: 'Store', s: 'keypad' }, 57: { l: 'Clear', s: 'keypad' }, 70: { l: 'Please', s: 'keypad' },
+            45: { l: '+', s: 'keypad' }, 53: { l: 'Thru', s: 'keypad' }, 61: { l: '-', s: 'keypad' },
+            69: { l: 'At', s: 'keypad' }, 68: { l: 'If', s: 'keypad' },
+            66: { l: '0', s: 'keypad' }, 58: { l: '1', s: 'keypad' }, 59: { l: '2', s: 'keypad' },
+            60: { l: '3', s: 'keypad' }, 50: { l: '4', s: 'keypad' }, 51: { l: '5', s: 'keypad' },
+            52: { l: '6', s: 'keypad' }, 42: { l: '7', s: 'keypad' }, 43: { l: '8', s: 'keypad' },
+            44: { l: '9', s: 'keypad' },
+            112: { l: '1', s: 'faders' }, 113: { l: '2', s: 'faders' }, 114: { l: '3', s: 'faders' },
+            115: { l: '4', s: 'faders' }, 116: { l: '5', s: 'faders' }, 117: { l: '6', s: 'faders' },
+            67: { l: '.', s: 'keypad' }, 118: { l: '__blackout__', s: '__blackout__' }
+        };
+        // Обратный маппинг label|sec -> id крыла (для волны на крыле)
+        var HW_REV = {};
+        for (var hwId in HW_MAP) {
+            if (HW_MAP.hasOwnProperty(hwId) && HW_MAP[hwId].l !== '__blackout__') {
+                HW_REV[HW_MAP[hwId].l + '|' + HW_MAP[hwId].s] = parseInt(hwId, 10);
+            }
+        }
+        var lastWingWave = 0;
+        function findPad(label, sec) {
+            var sel = (sec === 'faders') ? '.faders-section' : '.keypad-section';
+            var root = document.querySelector(sel);
+            var found = null;
+            (root ? [root] : []).forEach(function (r) {
+                r.querySelectorAll('button.pad').forEach(function (b) {
+                    if (!found && b.innerText.trim() === label) found = b;
+                });
+            });
+            if (!found) {
+                document.querySelectorAll('button.pad').forEach(function (b) {
+                    if (!found && b.innerText.trim() === label) found = b;
+                });
+            }
+            return found;
+        }
+        function flashPad(b) {
+            b.classList.add('ws-flash');
+            setTimeout(function () { b.classList.remove('ws-flash'); }, 220);
+        }
+        // Эксперимент 14.08: волна от отжатой кнопки по всем падам/иконкам
+        // (задержка вспышки ~ расстояние от центра кнопки). Параллельно
+        // та же волна уходит на ФИЗИЧЕСКОЕ крыло: [id, delay] по WS.
+        function waveEvents(src) {
+            if (!src) return [];
+            var sr = src.getBoundingClientRect();
+            var sx = sr.left + sr.width / 2, sy = sr.top + sr.height / 2;
+            var ev = [];
+            document.querySelectorAll('button.pad').forEach(function (b) {
+                var r = b.getBoundingClientRect();
+                var d = Math.sqrt(Math.pow(r.left + r.width / 2 - sx, 2) + Math.pow(r.top + r.height / 2 - sy, 2));
+                var wr = b.parentElement.closest('.faders-section');
+                var sec = wr ? 'faders' : 'keypad';
+                var id = HW_REV[b.innerText.trim() + '|' + sec];
+                ev.push([id, Math.round(d * 0.6)]);
+            });
+            return ev;
+        }
+        function waveFrom(src) {
+            if (!waveOn) return;
+            if (!src) return;
+            var sr = src.getBoundingClientRect();
+            var sx = sr.left + sr.width / 2, sy = sr.top + sr.height / 2;
+            var targets = [];
+            document.querySelectorAll('button.pad').forEach(function (b) { targets.push(b); });
+            var bi = document.getElementById('blackout-indicator');
+            if (bi) targets.push(bi);
+            targets.forEach(function (b) {
+                var r = b.getBoundingClientRect();
+                var d = Math.sqrt(Math.pow(r.left + r.width / 2 - sx, 2) + Math.pow(r.top + r.height / 2 - sy, 2));
+                setTimeout(function () {
+                    b.classList.add('ws-flash');
+                    setTimeout(function () { b.classList.remove('ws-flash'); }, 700);
+                }, Math.round(d * 0.6));
+            });
+        }
+        function wingBtnTo(id, v) {
+            var m = HW_MAP[id];
+            if (!m) return;
+            var b;
+            if (m.l === '__blackout__') {
+                b = document.getElementById('blackout-indicator');
+                if (!b) return;
+                if (v > 0) { b.click(); flashPad(b); } else waveFrom(b);
+                return;
+            }
+            b = findPad(m.l, m.s);
+            if (!b) return;
+            if (v > 0) { b.click(); flashPad(b); }
+            else {
+                waveFrom(b);
+                if (waveOn) {
+                    var now = Date.now();
+                    if (now - lastWingWave > 300) {
+                        lastWingWave = now;
+                        var ev = waveEvents(b);
+                        send_raw(JSON.stringify({ type: 'wing_wave', events: ev }));
+                    }
+                }
+            }
+        }
+
+        // --- Соединение ---
+        function connect() {
+            if (!wantOpen) return;
+            var host = (location.hostname && location.hostname !== '') ? location.hostname : '127.0.0.1';
+            try { WS = new WebSocket('ws://' + host + ':8000/ws'); }
+            catch (e) { scheduleReconnect(); return; }
+            WS.onopen = function () { retry = 0; log('Link: connected'); };
+            WS.onmessage = function (ev) {
+                var d;
+                try { d = JSON.parse(ev.data); } catch (e) { return; }
+                if (!d || !d.type) return;
+                if (d.type === 'hello_ack') {
+                    log('Link: server ok' + (d.payload && d.payload.clients !== undefined ? ' (' + d.payload.clients + ' cl)' : ''));
+                } else if (d.type === 'scene_store' && d.payload) {
+                    scenes = (d.payload.templates && d.payload.templates[d.payload.active]) || {};
+                    fillScenes(d.payload);
+                    renderThumbs();
+                } else if (d.type === 'route_store' && d.payload) {
+                    fillRoutes(d.payload);
+                } else if (d.type === 'wing_levels' && Array.isArray(d.payload)) {
+                    d.payload.forEach(function (v, i) { wingFaderTo(i + 1, v); });
+                } else if (d.type === 'wing_input' && d.payload && d.payload.kind === 'fader' && d.payload.id !== undefined) {
+                    wingFaderTo(d.payload.id, d.payload.value);
+                } else if (d.type === 'wing_input' && d.payload && d.payload.kind === 'button' && d.payload.id !== undefined) {
+                    wingBtnTo(d.payload.id, d.payload.value);
+                }
+            };
+            WS.onclose = function () { WS = null; log('Link: lost'); scheduleReconnect(); };
+            WS.onerror = function () { WS = null; scheduleReconnect(); };
+        }
+        function scheduleReconnect() {
+            if (!wantOpen) return;
+            retry = Math.min(retry + 1, 10);
+            setTimeout(connect, 800 * retry);
+        }
+        connect();
+    })();
+    </script>
 </body>
 </html>
-
-
