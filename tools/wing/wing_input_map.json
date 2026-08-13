@@ -17,42 +17,44 @@
   },
   {
    "fader": 3,
+   "channel": null,
+   "universe": 1,
+   "in_min": 0,
+   "in_max": 1023,
+   "enabled": false
+  },
+  {
+   "fader": 4,
+   "channel": null,
+   "universe": 1,
+   "in_min": 0,
+   "in_max": 1023,
+   "enabled": false
+  },
+  {
+   "fader": 5,
    "channel": 204,
    "universe": 1,
    "in_min": 0,
    "in_max": 1023
   },
   {
-   "fader": 4,
+   "fader": 6,
    "channel": 201,
    "universe": 1,
    "in_min": 0,
    "in_max": 1023
   },
   {
-   "fader": 5,
+   "fader": 7,
    "channel": 202,
    "universe": 1,
    "in_min": 0,
    "in_max": 1023
   },
   {
-   "fader": 6,
-   "channel": 203,
-   "universe": 1,
-   "in_min": 0,
-   "in_max": 1023
-  },
-  {
-   "fader": 7,
-   "channel": 206,
-   "universe": 1,
-   "in_min": 0,
-   "in_max": 1023
-  },
-  {
    "fader": 8,
-   "channel": 207,
+   "channel": 203,
    "universe": 1,
    "in_min": 0,
    "in_max": 1023
