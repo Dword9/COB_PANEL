@@ -1338,13 +1338,23 @@
             setRaw(ch, Math.max(0, Math.min(255, parseInt(v, 10) || 0)));
         }
 
-        // Физические кнопки крыла -> кнопки панели (сбор 13.08: по порядку нажатий юзера)
-        var HW_MAP = { 126: 'Go+', 119: 'Go-', 64: 'Store', 57: 'Clear', 70: 'Please', 66: '1', 58: '2', 59: '3', 60: '4', 50: '5', 51: '6', 52: '7', 42: '8', 43: '9', 44: '0' };
+        // Физические кнопки крыла -> кнопки панели (сбор 13.08, ПЕРЕСБОР 13.08:
+        // цифры крыла сдвинуты на 1 — физическая 0 = id 66; нижняя клавиатура)
+        var HW_MAP = { 126: 'Go+', 119: 'Go-', 64: 'Store', 57: 'Clear', 70: 'Please', 66: '0', 58: '1', 59: '2', 60: '3', 50: '4', 51: '5', 52: '6', 42: '7', 43: '8', 44: '9' };
         function findPad(label) {
+            var sec = (label === 'Go+' || label === 'Go-') ? '.faders-section' : '.keypad-section';
+            var root = document.querySelector(sec);
             var found = null;
-            document.querySelectorAll('button.pad').forEach(function (b) {
-                if (!found && b.innerText.trim() === label) found = b;
+            (root ? [root] : []).forEach(function (r) {
+                r.querySelectorAll('button.pad').forEach(function (b) {
+                    if (!found && b.innerText.trim() === label) found = b;
+                });
             });
+            if (!found) {
+                document.querySelectorAll('button.pad').forEach(function (b) {
+                    if (!found && b.innerText.trim() === label) found = b;
+                });
+            }
             return found;
         }
         function flashPad(b) {
