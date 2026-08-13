@@ -1,49 +1,229 @@
 {
-  "_comment": "Wing hardware -> DMX mapping. Faders/encoders decoded by interactive calibration (wing_calibrate.py) in the FULL USB session (wing streams them only while the host sends the 264-byte ctl packet 04 90 04 01 every cycle, see wing_driver.CMD_CTL). Faders: uint16 10-bit @80..94 (physical order: f1@92, f2@94, f3@80, f4@82, f5@84, f6@86, f7@88, f8@90). Encoders: signed int32 accumulated counters @32/36/40/44, mapped as relative increments.",
-  "faders": [
-    {"fader": 1, "channel": 1, "universe": 1, "in_min": 0, "in_max": 1023},
-    {"fader": 2, "channel": 2, "universe": 1, "in_min": 0, "in_max": 1023},
-    {"fader": 3, "channel": 3, "universe": 1, "in_min": 0, "in_max": 1023},
-    {"fader": 4, "channel": 4, "universe": 1, "in_min": 0, "in_max": 1023},
-    {"fader": 5, "channel": 5, "universe": 1, "in_min": 0, "in_max": 1023},
-    {"fader": 6, "channel": 6, "universe": 1, "in_min": 0, "in_max": 1023},
-    {"fader": 7, "channel": 7, "universe": 1, "in_min": 0, "in_max": 1023},
-    {"fader": 8, "channel": 8, "universe": 1, "in_min": 0, "in_max": 1023}
-  ],
-  "encoders": [
-    {"encoder": 1, "channel": 41, "universe": 1, "sensitivity": 1.0},
-    {"encoder": 2, "channel": 42, "universe": 1, "sensitivity": 1.0},
-    {"encoder": 3, "channel": 43, "universe": 1, "sensitivity": 1.0},
-    {"encoder": 4, "channel": 44, "universe": 1, "sensitivity": 1.0}
-  ],
-  "buttons": {
-    "42":  {"universe": 1, "channel": 11, "mode": "momentary"},
-    "43":  {"universe": 1, "channel": 12, "mode": "momentary"},
-    "44":  {"universe": 1, "channel": 13, "mode": "momentary"},
-    "45":  {"universe": 1, "channel": 14, "mode": "momentary"},
-    "50":  {"universe": 1, "channel": 15, "mode": "momentary"},
-    "51":  {"universe": 1, "channel": 16, "mode": "momentary"},
-    "52":  {"universe": 1, "channel": 17, "mode": "momentary"},
-    "53":  {"universe": 1, "channel": 18, "mode": "momentary"},
-    "57":  {"universe": 1, "channel": 19, "mode": "momentary"},
-    "58":  {"universe": 1, "channel": 20, "mode": "momentary"},
-    "59":  {"universe": 1, "channel": 21, "mode": "momentary"},
-    "60":  {"universe": 1, "channel": 22, "mode": "momentary"},
-    "61":  {"universe": 1, "channel": 23, "mode": "momentary"},
-    "64":  {"universe": 1, "channel": 24, "mode": "momentary"},
-    "66":  {"universe": 1, "channel": 25, "mode": "momentary"},
-    "67":  {"universe": 1, "channel": 26, "mode": "momentary"},
-    "68":  {"universe": 1, "channel": 27, "mode": "momentary"},
-    "69":  {"universe": 1, "channel": 28, "mode": "momentary"},
-    "70":  {"universe": 1, "channel": 29, "mode": "momentary"},
-    "112": {"universe": 1, "channel": 30, "mode": "momentary"},
-    "113": {"universe": 1, "channel": 31, "mode": "momentary"},
-    "114": {"universe": 1, "channel": 32, "mode": "momentary"},
-    "115": {"universe": 1, "channel": 33, "mode": "momentary"},
-    "116": {"universe": 1, "channel": 34, "mode": "momentary"},
-    "117": {"universe": 1, "channel": 35, "mode": "momentary"},
-    "118": {"universe": 1, "channel": 36, "mode": "momentary"},
-    "119": {"universe": 1, "channel": 37, "mode": "momentary"},
-    "126": {"universe": 1, "channel": 38, "mode": "momentary"}
+ "_comment": "Wing hardware -> DMX mapping. Faders/encoders decoded by interactive calibration (wing_calibrate.py) in the FULL USB session (wing streams them only while the host sends the 264-byte ctl packet 04 90 04 01 every cycle, see wing_driver.CMD_CTL). Faders: uint16 10-bit @80..94 (physical order: f1@92, f2@94, f3@80, f4@82, f5@84, f6@86, f7@88, f8@90). Encoders: signed int32 accumulated counters @32/36/40/44, mapped as relative increments.",
+ "faders": [
+  {
+   "fader": 1,
+   "channel": 200,
+   "universe": 1,
+   "in_min": 0,
+   "in_max": 1023
+  },
+  {
+   "fader": 2,
+   "channel": 205,
+   "universe": 1,
+   "in_min": 0,
+   "in_max": 1023
+  },
+  {
+   "fader": 3,
+   "channel": 204,
+   "universe": 1,
+   "in_min": 0,
+   "in_max": 1023
+  },
+  {
+   "fader": 4,
+   "channel": 201,
+   "universe": 1,
+   "in_min": 0,
+   "in_max": 1023
+  },
+  {
+   "fader": 5,
+   "channel": 202,
+   "universe": 1,
+   "in_min": 0,
+   "in_max": 1023
+  },
+  {
+   "fader": 6,
+   "channel": 203,
+   "universe": 1,
+   "in_min": 0,
+   "in_max": 1023
+  },
+  {
+   "fader": 7,
+   "channel": 206,
+   "universe": 1,
+   "in_min": 0,
+   "in_max": 1023
+  },
+  {
+   "fader": 8,
+   "channel": 207,
+   "universe": 1,
+   "in_min": 0,
+   "in_max": 1023
   }
+ ],
+ "encoders": [
+  {
+   "encoder": 1,
+   "channel": 41,
+   "universe": 1,
+   "sensitivity": 1.0
+  },
+  {
+   "encoder": 2,
+   "channel": 42,
+   "universe": 1,
+   "sensitivity": 1.0
+  },
+  {
+   "encoder": 3,
+   "channel": 43,
+   "universe": 1,
+   "sensitivity": 1.0
+  },
+  {
+   "encoder": 4,
+   "channel": 44,
+   "universe": 1,
+   "sensitivity": 1.0
+  }
+ ],
+ "buttons": {
+  "42": {
+   "universe": 1,
+   "channel": 11,
+   "mode": "momentary"
+  },
+  "43": {
+   "universe": 1,
+   "channel": 12,
+   "mode": "momentary"
+  },
+  "44": {
+   "universe": 1,
+   "channel": 13,
+   "mode": "momentary"
+  },
+  "45": {
+   "universe": 1,
+   "channel": 14,
+   "mode": "momentary"
+  },
+  "50": {
+   "universe": 1,
+   "channel": 15,
+   "mode": "momentary"
+  },
+  "51": {
+   "universe": 1,
+   "channel": 16,
+   "mode": "momentary"
+  },
+  "52": {
+   "universe": 1,
+   "channel": 17,
+   "mode": "momentary"
+  },
+  "53": {
+   "universe": 1,
+   "channel": 18,
+   "mode": "momentary"
+  },
+  "57": {
+   "universe": 1,
+   "channel": 19,
+   "mode": "momentary"
+  },
+  "58": {
+   "universe": 1,
+   "channel": 20,
+   "mode": "momentary"
+  },
+  "59": {
+   "universe": 1,
+   "channel": 21,
+   "mode": "momentary"
+  },
+  "60": {
+   "universe": 1,
+   "channel": 22,
+   "mode": "momentary"
+  },
+  "61": {
+   "universe": 1,
+   "channel": 23,
+   "mode": "momentary"
+  },
+  "64": {
+   "universe": 1,
+   "channel": 24,
+   "mode": "momentary"
+  },
+  "66": {
+   "universe": 1,
+   "channel": 25,
+   "mode": "momentary"
+  },
+  "67": {
+   "universe": 1,
+   "channel": 26,
+   "mode": "momentary"
+  },
+  "68": {
+   "universe": 1,
+   "channel": 27,
+   "mode": "momentary"
+  },
+  "69": {
+   "universe": 1,
+   "channel": 28,
+   "mode": "momentary"
+  },
+  "70": {
+   "universe": 1,
+   "channel": 29,
+   "mode": "momentary"
+  },
+  "112": {
+   "universe": 1,
+   "channel": 30,
+   "mode": "momentary"
+  },
+  "113": {
+   "universe": 1,
+   "channel": 31,
+   "mode": "momentary"
+  },
+  "114": {
+   "universe": 1,
+   "channel": 32,
+   "mode": "momentary"
+  },
+  "115": {
+   "universe": 1,
+   "channel": 33,
+   "mode": "momentary"
+  },
+  "116": {
+   "universe": 1,
+   "channel": 34,
+   "mode": "momentary"
+  },
+  "117": {
+   "universe": 1,
+   "channel": 35,
+   "mode": "momentary"
+  },
+  "118": {
+   "universe": 1,
+   "channel": 36,
+   "mode": "momentary"
+  },
+  "119": {
+   "universe": 1,
+   "channel": 37,
+   "mode": "momentary"
+  },
+  "126": {
+   "universe": 1,
+   "channel": 38,
+   "mode": "momentary"
+  }
+ }
 }
