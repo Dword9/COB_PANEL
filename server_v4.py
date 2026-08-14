@@ -152,6 +152,8 @@ class WingSender:
         # гаснут и держат ноль), дальше линия молчит — приборы не реагируют.
         self._bypass = False
         self._bypass_zeroed = False
+        # Последний кадр, реально ушедший в линию (для /api/debug/dmx).
+        self._last_sent = bytes(self.dmx_len)
         # Тумблер световой волны (14.08): серверный, синхронизируется панелям.
         # По умолчанию OFF; стартовая волна (boot=1) играет всегда.
         self._wing_wave_enabled = False
@@ -200,6 +202,11 @@ class WingSender:
           "bar"   — один общий уровень = max полос, слева направо по words;
           "bands" — отдельный столбик на каждую полосу low/mid/high.
         """
+        if self._bypass:
+            # Bypass (14.08): индикация из Lumina на крыло не уходит —
+            # VU-бары UI молчат, остаётся только собственный VU крыла
+            # (линейный вход, прошивка).
+            return
         if self._wing is None:
             return
         if self._led_map is None:
@@ -402,19 +409,26 @@ class WingSender:
                     # ВНЕ лока (зависший USB-write не должен ронять весь сервер,
                     # грабля 14.08: send_dmx внутри лока заморозил HTTP/WS).
                     if self._bypass:
-                        # Bypass: один нулевой кадр при включении, дальше тишина.
+                        # Bypass (14.08 v2): Lumina молчит, крыло работает.
+                        # В линию идёт ТОЛЬКО прямой роутинг крыла (LOCAL_SOURCE,
+                        # фейдеры/энкодеры из routing-пресета); все источники
+                        # Lumina (UI-клиенты ws:*) в кадр не попадают. Первый
+                        # кадр при включении — нулевой (сброс приборов).
                         send_zero = not self._bypass_zeroed
                         self._bypass_zeroed = True
+                        buf = self._sources.get(LOCAL_SOURCE)
+                        frame = bytes(buf) if buf else bytes(self.dmx_len)
                     else:
                         self._bypass_zeroed = False
+                        send_zero = False
                         frame = bytes(self.dmx_data)
                         if self._blackout:
                             frame = bytes(len(frame))
-                        send_zero = False
                 if send_zero:
                     self._wing.send_dmx(bytes(self.dmx_len), bytes(self.dmx_len))
                 else:
                     self._wing.send_dmx(frame, frame)
+                self._last_sent = frame
             except Exception as e:
                 logging.error("Ошибка записи в крыло: %s — переподключение...", e)
                 try:
@@ -1840,6 +1854,7 @@ async def debug_dmx_handler(request: web.Request):
         return web.json_response({"error": "no wing sender"})
     with sender._lock:
         data = list(sender.dmx_data)
+        sent = list(getattr(sender, "_last_sent", bytes(512)))
     # Каналы 1-8 (фейдеры крыла), 33-48 (кулисы: Backdrop L — первая пара), 200-207 (COB), 250-260 (расчёска мотор/скорость/первые лучи)
     return web.json_response({
         "ch_1_8": data[0:8],
@@ -1850,6 +1865,8 @@ async def debug_dmx_handler(request: web.Request):
         "ch_290_300": data[289:300],
         # 500+ — свободный хвост вселенной, на нём гоняются тесты HTP-микса
         "ch_500_512": data[499:512],
+        # Что реально ушло в линию (в bypass = только LOCAL_SOURCE крыла)
+        "sent_200_210": sent[199:210],
         "wing_dev": "yes" if (sender._wing and sender._wing.dev) else "no",
         "wing_led": (lambda lb: {"nonzero": sum(1 for i in range(0, 260, 2) if int.from_bytes(lb[i:i + 2], "little")), "sum": sum(int.from_bytes(lb[i:i + 2], "little") for i in range(0, 260, 2))})(bytes(sender._wing.led_body) if sender._wing else b""),
         "wing_wave_enabled": sender._wing_wave_enabled,
