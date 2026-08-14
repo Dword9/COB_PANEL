@@ -1123,7 +1123,10 @@
         var blackout = false;
         var waveOn = true;
         var waveToggle = document.getElementById('select-wing-wave');
-        if (waveToggle) waveToggle.addEventListener('change', function () { waveOn = waveToggle.checked; });
+        if (waveToggle) waveToggle.addEventListener('change', function () {
+            waveOn = waveToggle.checked;
+            send_raw(JSON.stringify({ type: 'wing_wave', enabled: waveOn ? 1 : 0 }));
+        });
         var curScene = -1, lastDigit = -1;
         var armedPad = null, holdTimer = null, HOLD_MS = 2400;
         var encLast = [0, 0, 0, 0];
@@ -1450,12 +1453,8 @@
             else {
                 waveFrom(b);
                 if (waveOn) {
-                    var now = Date.now();
-                    if (now - lastWingWave > 300) {
-                        lastWingWave = now;
-                        var ev = waveEvents(b);
-                        send_raw(JSON.stringify({ type: 'wing_wave', events: ev }));
-                    }
+                    var ev = waveEvents(b);
+                    send_raw(JSON.stringify({ type: 'wing_wave', events: ev }));
                 }
             }
         }
@@ -1485,6 +1484,9 @@
                     wingFaderTo(d.payload.id, d.payload.value);
                 } else if (d.type === 'wing_input' && d.payload && d.payload.kind === 'button' && d.payload.id !== undefined) {
                     wingBtnTo(d.payload.id, d.payload.value);
+                } else if (d.type === 'wing_wave_state' && d.payload) {
+                    waveOn = !!d.payload.enabled;
+                    if (waveToggle && waveToggle.checked !== waveOn) waveToggle.checked = waveOn;
                 }
             };
             WS.onclose = function () { WS = null; log('Link: lost'); scheduleReconnect(); };
