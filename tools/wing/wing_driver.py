@@ -108,6 +108,8 @@ class Wing:
         self._reader = None
         self._input_callback = None
         self._input_debug = os.environ.get("WING_INPUT_DEBUG") == "1"
+        self._in_pkts = 0  # диагностика (14.08): число принятых IN-пакетов крыла
+        self._in_last = 0  # длина последнего IN-пакета
         # LED-состояние: 130 слов u16 (яркость 0..2047), уходит в ctl-пакете
         self.led_body = bytearray(260)
         self._led_lock = threading.Lock()
@@ -162,6 +164,8 @@ class Wing:
             while not self._reader_stop.is_set():
                 try:
                     data = bytes(self.dev.read(EP_IN, 4096, timeout=200))
+                    self._in_pkts += 1
+                    self._in_last = len(data)
                     if self._input_callback is not None:
                         try:
                             self._input_callback(data)
@@ -182,6 +186,11 @@ class Wing:
     def is_input_alive(self) -> bool:
         """Жив ли поток чтения ввода крыла (14.08: перезапуск при тихой смерти)."""
         return self._reader is not None and self._reader.is_alive()
+
+    def input_stats(self) -> dict:
+        """Диагностика ввода крыла (14.08): число IN-пакетов и длина последнего."""
+        return {"pkts": self._in_pkts, "last_len": self._in_last,
+                "alive": self.is_input_alive()}
 
     def _stop_reader(self):
         self._reader_stop.set()

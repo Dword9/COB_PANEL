@@ -1377,7 +1377,11 @@
         });
 
         // --- Blackout: иконка B (видна в теме dimple-glow) + клавиши Numpad0/Insert ---
+        var lastBlackoutToggle = 0;
         function toggleBlackout() {
+            var now = Date.now();
+            if (now - lastBlackoutToggle < 300) return; // дебаунс дребезга кнопки (14.08)
+            lastBlackoutToggle = now;
             blackout = !blackout;
             var bi = el('blackout-indicator');
             if (bi) bi.classList.toggle('blinking', blackout);
