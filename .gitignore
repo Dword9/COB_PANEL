@@ -37,3 +37,7 @@ Thumbs.db
 *.swp
 .idea/
 .vscode/
+
+# --- tokens (NEVER commit) ---
+xxx*.txt
+*.txt.token
