@@ -488,6 +488,12 @@ class WingSender:
             self._bypass = bool(on)
             if not on:
                 self._bypass_zeroed = False
+            elif self._wing is not None:
+                # Гасим и индикацию крыла: кнопки не должны показывать уровни
+                # из Lumina, пока линия в bypass (жалоба 14.08). Нулевой
+                # led_body уйдёт в крыло вместе с нулевым кадром из send-цикла,
+                # дальше CTL-пакеты не отправляются — индикация молчит.
+                self._wing.clear_leds()
 
     def apply_routing(self, routing_map: dict) -> None:
         """Живо применить пресет роутинга крыла (фейдеры/энкодеры/кнопки).
