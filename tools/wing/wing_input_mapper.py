@@ -98,6 +98,7 @@ class WingInputMapper:
         self._last_faders = [None] * 8
         self._last_enc_raw = [None] * 4
         self._enc_value = [0, 0, 0, 0]  # virtual 0..255 positions
+        self._enc_zero = [None] * 4  # калибровка текущей USB-сессии: raw = «12 часов» = 0
         self._load_map()
 
     def _event(self, kind, ident, value):
@@ -138,6 +139,31 @@ class WingInputMapper:
         self._last_enc_raw = [None] * 4
         self._enc_value = [0, 0, 0, 0]
         logger.info("Карта роутинга крыла заменена на лету")
+
+    def reset_encoder(self, idx: int) -> None:
+        """Сбросить виртуальную позицию энкодера (условные «12 часов» = 0)
+
+        Калибровка ТЕКУЩЕЙ USB-сессии: текущее физическое положение ручки
+        становится «12 часами» = 0. Счётчики крыла обнуляются при старте
+        сессии, поэтому ноль живёт только в рамках сессии (персистентность
+        на диск — ГРАБЛЯ: после рестарта сервера raw стартует с 0, а старый
+        zero превращается в мёртвую зону на десятки/сотни детентов)."""
+        if not 1 <= idx <= 4:
+            return
+        i = idx - 1
+        cur = self._last_enc_raw[i]
+        if cur is None:
+            return
+        self._enc_zero[i] = cur
+        self._enc_value[i] = 0
+        logger.info("Энкодер %s откалиброван: физ. положение %s = 0 (12 часов)", idx, cur)
+
+    def get_encoder_state(self) -> list:
+        """Состояние энкодеров для дебага: [raw, zero, value] по каждому."""
+        return [
+            {"raw": self._last_enc_raw[i], "zero": self._enc_zero[i], "val": self._enc_value[i]}
+            for i in range(4)
+        ]
 
     def get_fader_levels(self) -> list:
         """Уровни физических фейдеров 1..8 по АКТИВНОЙ карте (для снапшота
@@ -216,12 +242,25 @@ class WingInputMapper:
         for idx, raw in enumerate(encoders):
             prev = self._last_enc_raw[idx]
             self._last_enc_raw[idx] = raw
-            if prev is None or raw == prev:
-                continue
             a = cfg[idx] if idx < len(cfg) else {}
             sens = float(a.get("sensitivity", 1.0))
-            new_val = self._enc_value[idx] + (raw - prev) * sens
-            new_val = max(0, min(255, int(round(new_val))))
+            # Скачок счётчика ~ новый старт USB-сессии (крыло обнуляет счётчики):
+            # калибровка «12 часов» из старой сессии больше недействительна.
+            if prev is not None and abs(raw - prev) > 100000:
+                self._enc_zero[idx] = None
+                self._enc_value[idx] = 0
+                logger.warning("Энкодер %s: скачок счётчика (новая сессия), калибровка сброшена", idx + 1)
+                continue
+            zero = self._enc_zero[idx]
+            if zero is not None:
+                # Абсолютный режим: значение = (сырой счётчик - калибровка 12ч)
+                new_val = (raw - zero) * sens
+            else:
+                # Дельта-режим (до первой калибровки): от позиции после старта
+                if prev is None or raw == prev:
+                    continue
+                new_val = self._enc_value[idx] + (raw - prev) * sens
+            new_val = int(round(new_val)) % 256
             if new_val == self._enc_value[idx]:
                 continue
             self._enc_value[idx] = new_val

@@ -147,6 +147,9 @@ class WingSender:
         # Серверный blackout (14.08): клиент/крыло шлют {type:'blackout'},
         # пока флаг поднят — в DMX уходит нулевой кадр, поверх HTP-микса.
         self._blackout = False
+        # Тумблер световой волны (14.08): серверный, синхронизируется панелям.
+        # По умолчанию OFF; стартовая волна (boot=1) играет всегда.
+        self._wing_wave_enabled = False
 
     # ---------- LED: волна и эквалайзер ----------
     def _maybe_wave(self):
@@ -250,30 +253,49 @@ class WingSender:
         except Exception:
             self._btn_word = {}
 
-    def wing_wave(self, events):
+    def wing_wave(self, events, boot=False):
         """Вспышки LED на крыле по задержкам от панели: events = [[btn_id, delay_ms], ...].
 
-        Старую волну обрываем, текущий LED-буфер запоминаем и восстанавливаем.
+        Серия волн (14.08, фикс зависания): снапшот LED снимается ОДИН раз при
+        старте серии (первая волна), восстановление делает только ПОСЛЕДНИЙ
+        поток серии (владелец). Промежуточные волны свой снапшот не берут и
+        чужое состояние не затирают — иначе на быстрых повторных нажатиях
+        оборванная волна возвращала старый буфер и волна «зависала».
+
+        boot=True — стартовая волна при подключении панели: играет ВСЕГДА,
+        независимо от тумблера _wing_wave_enabled (это сигнал перезагрузки).
         """
         if self._wing is None:
             return
-        if not hasattr(self, "_btn_word"):
-            self._btn_word = {}
-        if not self._btn_word:
+        if not boot and not getattr(self, "_wing_wave_enabled", False):
+            return
+        if not hasattr(self, "_btn_word") or not self._btn_word:
             self._load_btn_word_map()
         ev = [(int(a), int(b)) for a, b in events if a is not None]
         if not ev:
             return
         if not hasattr(self, "_wave_cancel"):
             self._wave_cancel = threading.Event()
-        self._wave_cancel.set()
+        if not hasattr(self, "_wave_state_lock"):
+            self._wave_state_lock = threading.Lock()
+        if not hasattr(self, "_wave_active"):
+            self._wave_active = False
+        with self._wave_state_lock:
+            if not self._wave_active:
+                with self._wing._led_lock:
+                    self._wave_restore = bytes(self._wing.led_body)
+                self._wave_active = True
+        old = getattr(self, "_wave_cancel", None)
+        if old is not None:
+            old.set()
         cancel = threading.Event()
         self._wave_cancel = cancel
+        token = object()
 
         def run():
+            with self._wave_state_lock:
+                self._wave_owner = token
             try:
-                with self._wing._led_lock:
-                    restore = bytes(self._wing.led_body)
                 t0 = time.time()
                 for btn_id, delay in sorted(ev, key=lambda x: x[1]):
                     if cancel.is_set() or self._stop.is_set():
@@ -285,12 +307,32 @@ class WingSender:
                     if word is not None:
                         self._wing.set_led(word, 2047)
                 time.sleep(0.7)
-                if not cancel.is_set() and self._wing is not None:
-                    self._wing.set_led_frame(restore)
             except Exception:
                 pass
+            finally:
+                with self._wave_state_lock:
+                    if getattr(self, "_wave_owner", None) is token:
+                        self._wave_active = False
+                        if self._wing is not None:
+                            try:
+                                self._wing.set_led_frame(self._wave_restore)
+                            except Exception:
+                                pass
 
         threading.Thread(target=run, daemon=True, name="wing-wave-btn").start()
+
+    def set_wing_wave_enabled(self, on: bool):
+        """Глобальный тумблер волны (14.08): выкл — волны не запускаются
+        и текущая немедленно обрывается (LED восстановятся её finally)."""
+        on = bool(on)
+        if not hasattr(self, "_wave_state_lock"):
+            self._wave_state_lock = threading.Lock()
+        with self._wave_state_lock:
+            self._wing_wave_enabled = on
+            if not on:
+                old = getattr(self, "_wave_cancel", None)
+                if old is not None:
+                    old.set()
 
     def start(self) -> bool:
         if not WING_AVAILABLE:
@@ -1476,6 +1518,58 @@ def broadcast_wing_event(app: web.Application, ev: dict):
         pass
 
 
+def broadcast_wing_wave_state(app: web.Application):
+    """Синхронизация тумблера световой волны между всеми панелями (14.08)."""
+    sender = app.get("artnet")
+    on = bool(getattr(sender, "_wing_wave_enabled", False)) if isinstance(sender, WingSender) else False
+    loop = app.get("loop")
+    msg = json.dumps({"type": "wing_wave_state", "payload": {"enabled": 1 if on else 0}},
+                     ensure_ascii=False)
+
+    async def _send():
+        for ws in list(UI_CLIENTS):
+            try:
+                await ws.send_str(msg)
+            except Exception:
+                UI_CLIENTS.discard(ws)
+
+    if loop is None:
+        asyncio.ensure_future(_send())
+        return
+    try:
+        asyncio.run_coroutine_threadsafe(_send(), loop)
+    except RuntimeError:
+        pass
+
+
+def broadcast_blackout_state(app: web.Application, exclude=None):
+    """Синхронизация блекаута между панелями (14.08): мигающая B на экранчике
+    у ВСЕХ клиентов, а не только у того, кто включил. exclude — ws источника
+    (он своё состояние уже знает)."""
+    sender = app.get("artnet")
+    on = bool(getattr(sender, "_blackout", False)) if isinstance(sender, WingSender) else False
+    loop = app.get("loop")
+    msg = json.dumps({"type": "blackout_state", "payload": {"set": 1 if on else 0}},
+                     ensure_ascii=False)
+
+    async def _send():
+        for ws in list(UI_CLIENTS):
+            if ws is exclude:
+                continue
+            try:
+                await ws.send_str(msg)
+            except Exception:
+                UI_CLIENTS.discard(ws)
+
+    if loop is None:
+        asyncio.ensure_future(_send())
+        return
+    try:
+        asyncio.run_coroutine_threadsafe(_send(), loop)
+    except RuntimeError:
+        pass
+
+
 def broadcast_clients(app: web.Application):
     """Сообщить всем клиентам, сколько их сейчас.
 
@@ -1533,6 +1627,16 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
     # 05.08: веб-панель показывает/дублирует движение крыла). Снапшот на
     # подключение, дальше — дельта-события wing_input.
     if isinstance(sender, WingSender):
+        # Пульту — текущее состояние тумблера волны (14.08: по умолчанию OFF)
+        await ws.send_str(json.dumps(
+            {"type": "wing_wave_state",
+             "payload": {"enabled": 1 if sender._wing_wave_enabled else 0}},
+            ensure_ascii=False))
+        # Пульту — текущее состояние блекаута (мигающая B на экранчике)
+        await ws.send_str(json.dumps(
+            {"type": "blackout_state",
+             "payload": {"set": 1 if sender._blackout else 0}},
+            ensure_ascii=False))
         with sender._lock:
             # Снапшот физических фейдеров по АКТИВНОЙ карте (13.08): карта
             # теперь шлёт фейдеры в каналы COB-раскладки 200-205/201-204, а не 1-8
@@ -1651,8 +1755,21 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                 elif isinstance(data, dict) and data.get("type") == "blackout":
                     sender.set_blackout(bool(data.get("set")))
                     logging.getLogger("lumina_ws").info("blackout %s (src=%s)", "ON" if data.get("set") else "OFF", src)
+                    broadcast_blackout_state(request.app, exclude=ws)
+                elif isinstance(data, dict) and data.get("type") == "enc_reset":
+                    # Сброс энкодера с панели: 12 часов = 0 (договорённость 14.08).
+                    # Только панель сбрасывает, крыло права сброса не имеет.
+                    mapper = getattr(sender, "_mapper", None)
+                    if mapper is not None:
+                        mapper.reset_encoder(int(data.get("idx", 1)))
+                        logging.getLogger("lumina_ws").info(
+                            "enc_reset idx=%s (src=%s)", data.get("idx"), src)
                 elif isinstance(data, dict) and data.get("type") == "wing_wave":
-                    sender.wing_wave(data.get("events") or [])
+                    if "enabled" in data:
+                        sender.set_wing_wave_enabled(data.get("enabled"))
+                        broadcast_wing_wave_state(request.app)
+                    else:
+                        sender.wing_wave(data.get("events") or [], boot=bool(data.get("boot")))
             except (ValueError, TypeError) as e:
                 # Одно битое сообщение не должно ронять соединение
                 logging.warning("Пропущено некорректное WS-сообщение: %s", e)
@@ -1694,7 +1811,9 @@ async def debug_dmx_handler(request: web.Request):
         "ch_500_512": data[499:512],
         "wing_dev": "yes" if (sender._wing and sender._wing.dev) else "no",
         "wing_led": (lambda lb: {"nonzero": sum(1 for i in range(0, 260, 2) if int.from_bytes(lb[i:i + 2], "little")), "sum": sum(int.from_bytes(lb[i:i + 2], "little") for i in range(0, 260, 2))})(bytes(sender._wing.led_body) if sender._wing else b""),
+        "wing_wave_enabled": sender._wing_wave_enabled,
         "blackout": sender._blackout,
+        "encoders": sender._mapper.get_encoder_state() if sender._mapper else [],
         "clients": len(UI_CLIENTS),
         # Сколько ненулевых каналов держит каждый источник в HTP-миксе:
         # >1 WS-источника = кто-то ещё управляет светом (вкладка/headless).
