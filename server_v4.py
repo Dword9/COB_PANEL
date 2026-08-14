@@ -147,6 +147,11 @@ class WingSender:
         # Серверный blackout (14.08): клиент/крыло шлют {type:'blackout'},
         # пока флаг поднят — в DMX уходит нулевой кадр, поверх HTP-микса.
         self._blackout = False
+        # Bypass (14.08): Lumina не генерирует сигналов на линии (отладка
+        # COB-панели). При включении уходит один нулевой кадр (приборы
+        # гаснут и держат ноль), дальше линия молчит — приборы не реагируют.
+        self._bypass = False
+        self._bypass_zeroed = False
         # Тумблер световой волны (14.08): серверный, синхронизируется панелям.
         # По умолчанию OFF; стартовая волна (boot=1) играет всегда.
         self._wing_wave_enabled = False
@@ -393,10 +398,23 @@ class WingSender:
                     logging.info("Крыло подключено (ввод восстановлен)")
                     self._maybe_wave()
                 with self._lock:
-                    frame = bytes(self.dmx_data)
-                    if self._blackout:
-                        frame = bytes(len(frame))
-                self._wing.send_dmx(frame, frame)
+                    # Лок держим только на чтение буфера — отправка и sleep
+                    # ВНЕ лока (зависший USB-write не должен ронять весь сервер,
+                    # грабля 14.08: send_dmx внутри лока заморозил HTTP/WS).
+                    if self._bypass:
+                        # Bypass: один нулевой кадр при включении, дальше тишина.
+                        send_zero = not self._bypass_zeroed
+                        self._bypass_zeroed = True
+                    else:
+                        self._bypass_zeroed = False
+                        frame = bytes(self.dmx_data)
+                        if self._blackout:
+                            frame = bytes(len(frame))
+                        send_zero = False
+                if send_zero:
+                    self._wing.send_dmx(bytes(self.dmx_len), bytes(self.dmx_len))
+                else:
+                    self._wing.send_dmx(frame, frame)
             except Exception as e:
                 logging.error("Ошибка записи в крыло: %s — переподключение...", e)
                 try:
@@ -459,6 +477,17 @@ class WingSender:
         """Глобальный blackout (14.08): нулевой кадр в крыло, пока включён."""
         with self._lock:
             self._blackout = bool(on)
+
+    def set_bypass(self, on: bool) -> None:
+        """Bypass (14.08): линия замолкает (нулевой кадр один раз при включении).
+
+        Для отладки приборов (COB-панель): Lumina не генерирует сигналов,
+        приборы держат ноль и не реагируют. При выключении — обычная работа.
+        """
+        with self._lock:
+            self._bypass = bool(on)
+            if not on:
+                self._bypass_zeroed = False
 
     def apply_routing(self, routing_map: dict) -> None:
         """Живо применить пресет роутинга крыла (фейдеры/энкодеры/кнопки).
@@ -1759,6 +1788,9 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                     sender.set_blackout(bool(data.get("set")))
                     logging.getLogger("lumina_ws").info("blackout %s (src=%s)", "ON" if data.get("set") else "OFF", src)
                     broadcast_blackout_state(request.app, exclude=ws)
+                elif isinstance(data, dict) and data.get("type") == "bypass":
+                    sender.set_bypass(bool(data.get("set")))
+                    logging.getLogger("lumina_ws").info("bypass %s (src=%s)", "ON" if data.get("set") else "OFF", src)
                 elif isinstance(data, dict) and data.get("type") == "enc_reset":
                     # Сброс энкодера с панели: 12 часов = 0 (договорённость 14.08).
                     # Только панель сбрасывает, крыло права сброса не имеет.
@@ -1816,11 +1848,14 @@ async def debug_dmx_handler(request: web.Request):
         "wing_led": (lambda lb: {"nonzero": sum(1 for i in range(0, 260, 2) if int.from_bytes(lb[i:i + 2], "little")), "sum": sum(int.from_bytes(lb[i:i + 2], "little") for i in range(0, 260, 2))})(bytes(sender._wing.led_body) if sender._wing else b""),
         "wing_wave_enabled": sender._wing_wave_enabled,
         "blackout": sender._blackout,
+        "bypass": sender._bypass,
         "encoders": sender._mapper.get_encoder_state() if sender._mapper else [],
         "clients": len(UI_CLIENTS),
         # Сколько ненулевых каналов держит каждый источник в HTP-миксе:
         # >1 WS-источника = кто-то ещё управляет светом (вкладка/headless).
         "sources": sender.source_stats(),
+        # Диагностика ввода крыла (14.08): жив ли поток и сколько IN-пакетов пришло
+        "wing_input": sender._wing.input_stats() if sender._wing else None,
     })
 
 async def calibration_handler(request: web.Request):

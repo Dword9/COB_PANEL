@@ -164,6 +164,9 @@ const FlowWrapper: React.FC = () => {
   const [isBlackout, setIsBlackout] = useState(false);
   const isBlackoutRef = useRef(false);
   useEffect(() => { isBlackoutRef.current = isBlackout; }, [isBlackout]);
+  const [isBypass, setIsBypass] = useState(false);
+  const isBypassRef = useRef(false);
+  useEffect(() => { isBypassRef.current = isBypass; }, [isBypass]);
   const [txActivity, setTxActivity] = useState(false);
   // Сколько клиентов подключено к серверу (сообщает сам сервер). >1 значит
   // светом управляет кто-то ещё — источник «прибор мигает» (грабля 26.07).
@@ -622,6 +625,15 @@ const FlowWrapper: React.FC = () => {
   useEffect(() => {
     (window as any).forceFullFrame = true;
   }, [isBlackout]);
+
+  // 2c2. Bypass: сервер замолкает на линии (отладка приборов — COB-панель).
+  // В отличие от blackout это серверный режим: UI продолжает слать кадры,
+  // но сервер не пускает их в линию. Один нулевой кадр + тишина.
+  const toggleBypass = () => {
+    const next = !isBypassRef.current;
+    setIsBypass(next);
+    dmxClient.current?.sendRaw({ type: 'bypass', set: next });
+  };
 
   // 2d. Калибровка наклона с сервера (tools/wing/tilt_calibration.json).
   // Пока не загрузилась — действуют консервативные дефолты tiltGuard.
@@ -1186,7 +1198,7 @@ const FlowWrapper: React.FC = () => {
         onSave={handleCreateCustomFixture}
       />
 
-      <Header status={status} txActivity={txActivity} clientCount={clientCount} tiltMeasured={tiltMeasured} hallAllowed={hallAllowed} onOpenTilt={() => setTiltPanelOpen(true)} isBlackout={isBlackout} onToggleBlackout={() => setIsBlackout(!isBlackout)} onSave={handleSaveProject} onLoad={handleLoadProject} onLoadClick={handleLoadProject} fileInputRef={fileInputRef} bridgeUrl={bridgeUrl} onBridgeUrlChange={setBridgeUrl} onReset={resetProject} onFitView={() => fitView({ duration: 800 })} onCollapseAllFixtures={toggleAllFixturesCollapse} />
+      <Header status={status} txActivity={txActivity} clientCount={clientCount} tiltMeasured={tiltMeasured} hallAllowed={hallAllowed} onOpenTilt={() => setTiltPanelOpen(true)} isBlackout={isBlackout} onToggleBlackout={() => setIsBlackout(!isBlackout)} bypass={isBypass} onToggleBypass={toggleBypass} onSave={handleSaveProject} onLoad={handleLoadProject} onLoadClick={handleLoadProject} fileInputRef={fileInputRef} bridgeUrl={bridgeUrl} onBridgeUrlChange={setBridgeUrl} onReset={resetProject} onFitView={() => fitView({ duration: 800 })} onCollapseAllFixtures={toggleAllFixturesCollapse} />
       <div className="flex-1 relative flex overflow-hidden">
         <Sidebar 
           onAddNode={addNode}

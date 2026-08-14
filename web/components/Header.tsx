@@ -16,6 +16,8 @@ interface HeaderProps {
     onOpenTilt?: () => void;
     isBlackout: boolean;
     onToggleBlackout: () => void;
+    bypass: boolean;
+    onToggleBypass: () => void;
     onSave: () => void;
     onLoad: (e: React.ChangeEvent<HTMLInputElement>) => void;
     onLoadClick: () => void;
@@ -28,7 +30,7 @@ interface HeaderProps {
 }
 
 const Header: React.FC<HeaderProps> = ({ 
-    status, txActivity, clientCount = 1, tiltMeasured = false, hallAllowed = false, onOpenTilt, isBlackout, onToggleBlackout, onSave, onLoad, onLoadClick, fileInputRef,
+    status, txActivity, clientCount = 1, tiltMeasured = false, hallAllowed = false, onOpenTilt, isBlackout, onToggleBlackout, bypass, onToggleBypass, onSave, onLoad, onLoadClick, fileInputRef,
     bridgeUrl, onBridgeUrlChange, onReset, onFitView, onCollapseAllFixtures
 }) => {
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -173,6 +175,20 @@ const Header: React.FC<HeaderProps> = ({
             >
               <div className={`w-2 h-2 rounded-full ${isBlackout ? 'bg-white' : 'bg-zinc-700'}`} />
               {isBlackout ? 'BLACKOUT ACTIVE' : 'BLACKOUT'}
+            </button>
+
+            {/* BYPASS */}
+            <button 
+                onClick={onToggleBypass} 
+                className={`flex items-center gap-3 px-6 py-2.5 rounded-xl text-[10px] font-black border-2 transition-all active:scale-95 ${
+                    bypass 
+                    ? 'bg-amber-500 border-amber-400 text-black shadow-lg shadow-amber-500/40 animate-pulse' 
+                    : 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300'
+                }`}
+                title="Bypass: линия замолкает (отладка приборов — COB-панель)"
+            >
+              <div className={`w-2 h-2 rounded-full ${bypass ? 'bg-black' : 'bg-zinc-700'}`} />
+              {bypass ? 'BYPASS ACTIVE' : 'BYPASS'}
             </button>
 
             <div className="w-px h-6 bg-zinc-800 mx-1" />
