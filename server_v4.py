@@ -152,6 +152,10 @@ class WingSender:
         # гаснут и держат ноль), дальше линия молчит — приборы не реагируют.
         self._bypass = False
         self._bypass_zeroed = False
+        # Источники, слающие ПОЛНЫЕ кадры (списки) — автоматика Lumina
+        # (консоль: граф/сцены/генераторы). В bypass они отсекаются;
+        # single-управление (фейдеры веб-панели, прямое крыло) проходит.
+        self._list_sources = set()
         # Последний кадр, реально ушедший в линию (для /api/debug/dmx).
         self._last_sent = bytes(self.dmx_len)
         # Тумблер световой волны (14.08): серверный, синхронизируется панелям.
@@ -409,15 +413,24 @@ class WingSender:
                     # ВНЕ лока (зависший USB-write не должен ронять весь сервер,
                     # грабля 14.08: send_dmx внутри лока заморозил HTTP/WS).
                     if self._bypass:
-                        # Bypass (14.08 v2): Lumina молчит, крыло работает.
-                        # В линию идёт ТОЛЬКО прямой роутинг крыла (LOCAL_SOURCE,
-                        # фейдеры/энкодеры из routing-пресета); все источники
-                        # Lumina (UI-клиенты ws:*) в кадр не попадают. Первый
-                        # кадр при включении — нулевой (сброс приборов).
+                        # Bypass (14.08 v3): в линию идёт ТОЛЬКО ручное
+                        # управление — прямое крыло (LOCAL_SOURCE) + источники,
+                        # слающие single-обновления (веб-панель COB: фейдеры/
+                        # энкодеры). Источники полных кадров (консоль Lumina —
+                        # граф/сцены/генераторы) отсекаются. Первый кадр при
+                        # включении — нулевой (сброс приборов).
                         send_zero = not self._bypass_zeroed
                         self._bypass_zeroed = True
                         buf = self._sources.get(LOCAL_SOURCE)
-                        frame = bytes(buf) if buf else bytes(self.dmx_len)
+                        manual = bytearray(buf) if buf else bytearray(self.dmx_len)
+                        for s, b in self._sources.items():
+                            if s is LOCAL_SOURCE or s in self._list_sources:
+                                continue
+                            for i in range(self.dmx_len):
+                                v = b[i]
+                                if v > manual[i]:
+                                    manual[i] = v
+                        frame = bytes(manual)
                     else:
                         self._bypass_zeroed = False
                         send_zero = False
@@ -1725,6 +1738,10 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                             except Exception:
                                 UI_CLIENTS.discard(client)
                 elif isinstance(data, list):
+                    # Полный кадр (автоматика Lumina: граф/сцены/генераторы).
+                    # Помечаем источник — в bypass такие отсекаются, а ручное
+                    # single-управление (веб-панель) продолжает работать (14.08).
+                    sender._list_sources.add(src)
                     # Дамп WS-трафика в лог для расследования мигания
                     if os.environ.get("LUMINA_WS_LOG") == "1" and data:
                         dml = logging.getLogger("lumina_ws")
