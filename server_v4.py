@@ -384,10 +384,13 @@ class WingSender:
         # «свои» адреса и игнорирует чужие. Отдельная адресация U2 не нужна.
         while not self._stop.is_set():
             try:
-                if self._wing.dev is None:
+                if self._wing.dev is None or not self._wing.is_input_alive():
                     # сессия ещё не установлена (крыло было занято при старте)
+                    # ИЛИ поток ввода тихо умер (USBError в reader) — выход DMX
+                    # при этом жив, поэтому ввод крыла перестаёт доходить до
+                    # панели. Перезапускаем сессию, чтобы вернуть и ввод (14.08).
                     self._wing.start()
-                    logging.info("Крыло подключено")
+                    logging.info("Крыло подключено (ввод восстановлен)")
                     self._maybe_wave()
                 with self._lock:
                     frame = bytes(self.dmx_data)

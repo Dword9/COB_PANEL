@@ -179,6 +179,10 @@ class Wing:
         self._reader = threading.Thread(target=_run, daemon=True)
         self._reader.start()
 
+    def is_input_alive(self) -> bool:
+        """Жив ли поток чтения ввода крыла (14.08: перезапуск при тихой смерти)."""
+        return self._reader is not None and self._reader.is_alive()
+
     def _stop_reader(self):
         self._reader_stop.set()
         if self._reader is not None:
