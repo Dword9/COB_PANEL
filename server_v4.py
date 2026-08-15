@@ -13,6 +13,14 @@ from typing import Any, Dict, Set
 
 from aiohttp import web, WSMsgType
 
+# Консольная модель пульта (15.08): движок живёт на сервере, крыло/панели —
+# ввод+индикация. См. docs/panel-console-impl.md.
+try:
+    from console_engine import ConsoleEngine, load_slots
+    CONSOLE_AVAILABLE = True
+except Exception:
+    CONSOLE_AVAILABLE = False
+
 # Прямой выход в USB-крыло (VID 03EB / PID 160B) — драйвер лежит в tools/wing
 WING_DIR = os.path.join(os.path.dirname(__file__), "tools", "wing")
 sys.path.insert(0, WING_DIR)
@@ -117,9 +125,15 @@ LOCAL_SOURCE = "wing-local"
 # (live-раздел депо). Все веб-версии пишут сюда — это один слепок состояния,
 # в отличие от per-client буферов (ws:*) для консоли.
 DEPOT_SOURCE = "depot-live"
+# Ключ источника для КОНСОЛЬНОЙ МОДЕЛИ ПУЛЬТА (15.08): движок консоли
+# (console_engine.py) пишет сюда полный кадр 512. НЕ list-источник ⇒ в bypass
+# консоль проходит, в обычном режиме HTP-суммируется с автоматикой Lumina.
+CONSOLE_SOURCE = "console"
 # Как часто рассылать live-раздел депо при изменениях каналов (синхронизация
 # всех веб-версий между собой; полный слепок depot_state — только по запросу).
 DEPOT_LIVE_TTL = 0.2
+# Троттл рассылки console_state (полное состояние консольной модели).
+CONSOLE_STATE_TTL = 0.2
 
 
 class WingSender:
@@ -486,6 +500,23 @@ class WingSender:
                 return  # источник не изменился — микс тот же
             buf[ch_index] = value
             self._remix_channel(ch_index)
+
+    def set_source_frame(self, source: Any, frame) -> None:
+        """Заменить кадр источника целиком и пересчитать HTP-микс (консоль).
+
+        Движок консоли (CONSOLE_SOURCE) шлёт полный кадр 512 при каждом
+        изменении состояния — поканальная запись здесь дороже (512 ремиксов
+        против замены буфера + полный ремикс).
+        """
+        if len(frame) != self.dmx_len:
+            return
+        with self._lock:
+            buf = bytearray(frame)
+            if self._sources.get(source) == buf:
+                return
+            self._sources[source] = buf
+            for ch in range(self.dmx_len):
+                self._remix_channel(ch)
 
     def _remix_channel(self, ch_index: int) -> None:
         """HTP по одному каналу. Вызывать под self._lock."""
@@ -1640,11 +1671,19 @@ def _line_frame(sender: WingSender) -> bytes:
 
 
 def _depot_fader_levels(sender: WingSender) -> list:
-    """Уровни фейдеров 1..8 для live-зеркала: мапленные читаются из кадра
+    """Уровни фейдеров 1..8 для live-зеркала.
+
+    Консольная модель (15.08): позиции берём из движка консоли (мастер/суб по
+    режиму, в ALT — каналы программера). Иначе — мапленные читаются из кадра
     линии (общее состояние), ПУСТЫЕ (немапленные) — физическая позиция крыла
     (mapper._fader_display), чтобы веб показывал движение фейдеров, даже если
-    DMX-канала нет (иначе нарушение синхронизации, пользователь думает, что
-    фейдер не работает)."""
+    DMX-канала нет."""
+    engine = getattr(sender, "console_engine", None)
+    if engine is not None:
+        try:
+            return engine.fader_levels()
+        except Exception:
+            pass
     out = [0] * 8
     mapper = getattr(sender, "_mapper", None)
     disp = [0] * 8
@@ -1809,6 +1848,66 @@ async def _depot_live_shot(app: web.Application) -> None:
             await ws.send_str(msg)
         except Exception:
             UI_CLIENTS.discard(ws)
+
+
+def _console_engine(app: web.Application):
+    """Движок консольной модели (None, если выключен)."""
+    if not CONSOLE_AVAILABLE:
+        return None
+    return app.get("console")
+
+
+def broadcast_console_state(app: web.Application, exclude=None) -> None:
+    """Полное состояние консольной модели -> всем UI-клиентам."""
+    engine = _console_engine(app)
+    if engine is None:
+        return
+    loop = app.get("loop")
+    if loop is None:
+        return
+    msg = json.dumps({"type": "console_state", "payload": engine.state_dict()},
+                     ensure_ascii=False)
+
+    async def _send():
+        for ws in list(UI_CLIENTS):
+            if ws is exclude:
+                continue
+            try:
+                await ws.send_str(msg)
+            except Exception:
+                UI_CLIENTS.discard(ws)
+
+    try:
+        asyncio.run_coroutine_threadsafe(_send(), loop)
+    except RuntimeError:
+        pass
+
+
+def schedule_console_state_broadcast(app: web.Application) -> None:
+    """Троттл-бродкаст console_state (полное состояние консоли)."""
+    loop = app.get("loop")
+    if loop is None:
+        return
+    now = time.monotonic()
+    last = app.get("_console_state_ts", 0.0)
+    if now - last < CONSOLE_STATE_TTL:
+        return
+    app["_console_state_ts"] = now
+
+    async def _send():
+        try:
+            await asyncio.wait_for(_console_state_shot(app), timeout=2.0)
+        except Exception:
+            pass
+
+    try:
+        asyncio.run_coroutine_threadsafe(_send(), loop)
+    except RuntimeError:
+        pass
+
+
+async def _console_state_shot(app: web.Application) -> None:
+    broadcast_console_state(app)
 
 
 def broadcast_routing_store(app: web.Application):
@@ -2003,6 +2102,11 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
     # для новых/удалённых экземпляров — дальше правки идут дельтами depot_state.
     await ws.send_str(json.dumps(
         {"type": "depot_state", "payload": wing_depot_payload(sender)}, ensure_ascii=False))
+    # Консольная модель (15.08): полное состояние движка консоли на коннект.
+    engine = _console_engine(app)
+    if engine is not None:
+        await ws.send_str(json.dumps(
+            {"type": "console_state", "payload": engine.state_dict()}, ensure_ascii=False))
     # Пульту — текущие уровни физических фейдеров крыла (обратная связь,
     # 05.08: веб-панель показывает/дублирует движение крыла). Снапшот на
     # подключение, дальше — дельта-события wing_input.
@@ -2107,11 +2211,27 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                                 SCENE_STORE["active"] = ""
                             save_scene_store(SCENE_STORE)
                             broadcast_scene_store(app)
+                    # Консоль: сцены движка = активный шаблон стора.
+                    eng = _console_engine(app)
+                    if eng is not None:
+                        eng.load_scenes(SCENE_STORE)
+                        broadcast_console_state(app)
                 elif isinstance(data, dict) and data.get("type") == "depot_get":
                     # Запрос полного слепка депо (удалённая/поздняя панель)
                     await ws.send_str(json.dumps(
                         {"type": "depot_state", "payload": wing_depot_payload(sender)},
                         ensure_ascii=False))
+                elif isinstance(data, dict) and data.get("type") == "console":
+                    # Консольная модель (15.08): действия панели -> движок консоли.
+                    engine = _console_engine(app)
+                    if engine is None:
+                        logging.warning("console-действие, но движок не активен")
+                    else:
+                        action = str(data.get("action") or "")
+                        try:
+                            engine.on_action(action, **{k: v for k, v in data.items() if k not in ("type", "action")})
+                        except Exception as e:
+                            logging.warning("console-action '%s' не выполнен: %s", action, e)
                 elif isinstance(data, dict) and data.get("type") == "depot_set":
                     # Программирование ЕДИНОГО ДЕПО (14.08): правка любого раздела
                     # (routing/scenes/playback/live) из любой веб-версии -> слепок
@@ -2137,6 +2257,10 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                             SCENE_STORE["templates"][cur][str(int(idx))] = snap
                             save_scene_store(SCENE_STORE)
                             broadcast_scene_store(app)
+                            eng = _console_engine(app)
+                            if eng is not None:
+                                eng.load_scenes(SCENE_STORE)
+                                broadcast_console_state(app)
                     elif section == "playback":
                         WING_DEPOT["playback"] = payload if isinstance(payload, dict) else {}
                         save_wing_depot()
@@ -2430,7 +2554,55 @@ async def on_startup(app: web.Application):
     sender = app.get("artnet")
     if isinstance(sender, WingSender):
         # Крыло шлёт события ввода из своего потока — пересылаем в UI по WS
-        sender.event_cb = lambda ev: broadcast_wing_event(app, ev)
+        # и в движок консольной модели (если она активна).
+        def _wing_event(ev):
+            broadcast_wing_event(app, ev)
+            engine = _console_engine(app)
+            if engine is not None:
+                try:
+                    engine.on_input("wing", ev.get("kind"), ev.get("id"), ev.get("value"))
+                except Exception:
+                    pass
+        sender.event_cb = _wing_event
+        # Консольная модель (15.08): фейдеры/кнопки крыла НЕ пишут DMX сами —
+        # двигают движок консоли; энкодеры остаются на прямом роутинге 41-44.
+        if CONSOLE_AVAILABLE and sender._mapper is not None:
+            try:
+                sender._mapper.set_console_mode(True)
+            except Exception as e:
+                logging.warning("console_mode маппера не включён: %s", e)
+    # Консольная модель: движок на сервере (источник правды для крыла и панелей).
+    if CONSOLE_AVAILABLE:
+        try:
+            engine = ConsoleEngine(slots=load_slots())
+            engine.load_scenes(SCENE_STORE)
+            sender = app.get("artnet")
+            if isinstance(sender, WingSender):
+                sender.console_engine = engine
+            def _console_frame(frame):
+                sender = app.get("artnet")
+                if isinstance(sender, WingSender):
+                    try:
+                        sender.set_source_frame(CONSOLE_SOURCE, frame)
+                    except Exception:
+                        pass
+            def _console_changed():
+                broadcast_console_state(app)
+                schedule_depot_live_broadcast(app)
+            def _console_scene_save(n: int, snap: dict):
+                cur = scene_active_template()
+                SCENE_STORE["templates"][cur][str(int(n))] = snap
+                save_scene_store(SCENE_STORE)
+                broadcast_scene_store(app)
+                broadcast_console_state(app)
+            engine.on_frame = _console_frame
+            engine.on_changed = _console_changed
+            engine.on_scene_save = _console_scene_save
+            app["console"] = engine
+            engine.on_frame(bytes(engine.dmx_len))
+            logging.info("Консольная модель пульта активна (console_engine.py)")
+        except Exception as e:
+            logging.error("Консольная модель не инициализирована: %s", e)
     # Пресет роутинга: при пустом сторе создаём 'default' из файла крыла
     routing_active_name()
     logging.info("Lumina Backend Started. Output: %s", app["output_name"])

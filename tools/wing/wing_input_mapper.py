@@ -89,9 +89,10 @@ class WingInputMapper:
     слушать крыло для Learn-режима MidiNode.
     """
 
-    def __init__(self, write_dmx=None, on_event=None):
+    def __init__(self, write_dmx=None, on_event=None, console_mode=False):
         self._write_dmx = write_dmx
         self._on_event = on_event
+        self._console_mode = bool(console_mode)
         self._debug = os.environ.get("WING_INPUT_DEBUG") == "1"
         self._map = {"faders": [], "encoders": [], "buttons": {}}
         self._dmx = {1: bytearray(512), 2: bytearray(512)}
@@ -141,6 +142,13 @@ class WingInputMapper:
         self._last_enc_raw = [None] * 4
         self._enc_value = [0, 0, 0, 0]
         logger.info("Карта роутинга крыла заменена на лету")
+
+    def set_console_mode(self, on: bool) -> None:
+        """Режим консольной модели (15.08): фейдеры/кнопки НЕ пишут в DMX —
+        только on_event (движок консоли); энкодеры продолжают прямой роутинг
+        на 41-44 (стопгап). False = старое поведение (прямой роутинг)."""
+        self._console_mode = bool(on)
+        logger.info("Режим консоли крыла: %s", "ВКЛ" if self._console_mode else "ВЫКЛ")
 
     def reset_encoder(self, idx: int) -> None:
         """Сбросить виртуальную позицию энкодера (условные «12 часов» = 0)
@@ -236,6 +244,10 @@ class WingInputMapper:
             out = self._scale(raw, in_min, in_max)
             self._fader_display[idx] = out
             self._event("fader", idx + 1, out)
+            if self._console_mode:
+                # Консольная модель (15.08): фейдер двигает движок консоли
+                # (on_event), DMX-канал сам не пишет.
+                continue
             if not a.get("enabled", True):
                 continue
             channel = a.get("channel")
@@ -287,6 +299,12 @@ class WingInputMapper:
 
     def _apply_button(self, bid, pressed):
         self._event("button", bid, 255 if pressed else 0)
+        if self._console_mode:
+            # Консольная модель (15.08): кнопка шлёт on_event движку консоли,
+            # DMX-канал не пишет.
+            if self._debug:
+                logger.info("button id=%s %s (console)", bid, "PRESS" if pressed else "release")
+            return
         cfg = self._map.get("buttons", {}).get(str(bid)) or self._map.get("buttons", {}).get(bid)
         if not cfg:
             if self._debug:

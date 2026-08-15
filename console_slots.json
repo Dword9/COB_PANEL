@@ -1,0 +1,21 @@
+{
+  "slots": [
+    { "num": "0",  "name": "PAR-свет",      "fixtures": [{"type": "dimmer", "start": 1, "count": 12}] },
+    { "num": "1",  "name": "COB",            "fixtures": [{"type": "led_par_8ch", "start": 200, "count": 1},
+                                                          {"type": "led_par_8ch", "start": 200, "count": 1}] },
+    { "num": "2",  "name": "Кулисы",         "fixtures": [{"type": "led_par", "start": 33, "count": 6, "step": 16}] },
+    { "num": "3",  "name": "Расчёска 1",     "fixtures": [{"type": "comb_rgbw", "start": 250, "count": 1}] },
+    { "num": "4",  "name": "Расчёска 2",     "fixtures": [{"type": "comb_rgbw", "start": 293, "count": 1}] },
+    { "num": "5",  "name": "Расчёска 3",     "fixtures": [{"type": "comb_rgbw", "start": 336, "count": 1}] },
+    { "num": "6",  "name": "Расчёска 4",     "fixtures": [{"type": "comb_rgbw", "start": 379, "count": 1}] },
+    { "num": "7",  "name": "Mini PAR L",     "fixtures": [{"type": "mini_par", "start": 422, "count": 2, "step": 7}] },
+    { "num": "8",  "name": "Mini PAR R",     "fixtures": [{"type": "mini_par", "start": 436, "count": 2, "step": 7}] },
+    { "num": "9",  "name": "COB 3 (резерв)", "fixtures": [{"type": "led_par_8ch", "start": 208, "count": 1}] },
+    { "num": "11", "name": "COB 4 (резерв)", "fixtures": [{"type": "led_par_8ch", "start": 216, "count": 1}] },
+    { "num": "12", "name": "Spider L",       "fixtures": [{"type": "spider", "start": 129, "count": 1}] },
+    { "num": "13", "name": "Spider C",       "fixtures": [{"type": "spider", "start": 145, "count": 1}] },
+    { "num": "14", "name": "Spider R",       "fixtures": [{"type": "spider", "start": 161, "count": 1}] },
+    { "num": "15", "name": "Фонтаны",        "fixtures": [{"type": "spark", "start": 177, "count": 2, "step": 2}] },
+    { "num": "16", "name": "Laser (снят)",   "fixtures": [{"type": "laser", "start": 184, "count": 1}] }
+  ]
+}
