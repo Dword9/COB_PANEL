@@ -157,7 +157,9 @@ class WingSender:
         # Bypass (14.08): Lumina не генерирует сигналов на линии (отладка
         # COB-панели). При включении уходит один нулевой кадр (приборы
         # гаснут и держат ноль), дальше линия молчит — приборы не реагируют.
-        self._bypass = False
+        # По умолчанию ВКЛЮЧЁН при старте (15.08): сервер поднимается в
+        # «ручном режиме» — только крыло/веб-панель, автоматика молчит.
+        self._bypass = True
         self._bypass_zeroed = False
         # Источники, слающие ПОЛНЫЕ кадры (списки) — автоматика Lumina
         # (консоль: граф/сцены/генераторы). В bypass они отсекаются;
@@ -1575,32 +1577,80 @@ def save_wing_depot() -> None:
 WING_DEPOT = load_wing_depot()
 
 
-def _wing_depot_live(sender: Any) -> Dict:
-    """Зеркало текущих значений крыла (live-раздел депо).
+def _line_frame(sender: WingSender) -> bytes:
+    """Кадр, который СЕЙЧАС ушёл бы в линию — единый источник правды для
+    live-зеркал. Дублирует расчёт send-цикла (14.08 v3): в bypass это
+    manual-микс (LOCAL_SOURCE + все single-источники; list-источники консоли
+    отсекаются), иначе — HTP-микс с учётом блекаута. Чтение из буферов
+    напрямую (не _last_sent) исключает гонку: бродкаст после single-записи
+    читает УЖЕ записанное значение, не дожидаясь тика send-потока."""
+    with sender._lock:
+        if sender._bypass:
+            buf = sender._sources.get(LOCAL_SOURCE)
+            frame = bytearray(buf) if buf else bytearray(sender.dmx_len)
+            for s, b in sender._sources.items():
+                if s is LOCAL_SOURCE or s in sender._list_sources:
+                    continue
+                for i in range(sender.dmx_len):
+                    v = b[i]
+                    if v > frame[i]:
+                        frame[i] = v
+            return bytes(frame)
+        frame = bytes(sender.dmx_data)
+        if sender._blackout:
+            frame = bytes(len(frame))
+        return frame
 
-    faders/encoders/buttons — физическое крыло (по активной карте роутинга);
-    channels — ИТОГОВЫЙ микс (dmx_data): то, что реально на линии, т.е. единый
-    слепок для всех веб-версий. Каждая веб-панель пишет в СВОЙ per-client
-    источник (single {ch,val}), депо лишь ОТРАЖАЕТ результат HTP — иначе общий
-    буфер дал бы last-write-wins и панели затирали бы друг друга.
+
+def _depot_fader_levels(sender: WingSender) -> list:
+    """Уровни фейдеров 1..8 для live-зеркала: мапленные читаются из кадра
+    линии (общее состояние), ПУСТЫЕ (немапленные) — физическая позиция крыла
+    (mapper._fader_display), чтобы веб показывал движение фейдеров, даже если
+    DMX-канала нет (иначе нарушение синхронизации, пользователь думает, что
+    фейдер не работает)."""
+    out = [0] * 8
+    mapper = getattr(sender, "_mapper", None)
+    disp = [0] * 8
+    if mapper is not None:
+        try:
+            disp = list(mapper.get_fader_display())
+        except Exception:
+            pass
+    try:
+        d = _line_frame(sender)
+        if d:
+            for i in range(8):
+                ch = _depot_fader_channel(sender, i + 1)
+                if ch is not None and 1 <= ch <= len(d):
+                    out[i] = d[ch - 1]
+                elif i < len(disp):
+                    out[i] = disp[i]
+    except Exception:
+        pass
+    return out
+
+
+def _wing_depot_live(sender: Any) -> Dict:
+    """Зеркало текущего состояния (live-раздел депо).
+
+    Крыло и веб-панели — ОДНА поверхность: панель пишет single {ch,val} в
+    LOCAL_SOURCE (last-write-wins), крыло пишет туда же. Поэтому всё live
+    читается из кадра, уходящего в линию (_line_frame): движение на любой
+    панели видно на всех остальных, а поднятое крылом убирается с веб-панели
+    и наоборот. faders/encoders — значения по каналам АКТИВНОЙ карты
+    роутинга из того же кадра.
     """
     live = {"faders": [0] * 8, "encoders": [0] * 4, "buttons": {}, "channels": {}}
     if isinstance(sender, WingSender):
-        mapper = getattr(sender, "_mapper", None)
-        if mapper is not None:
-            try:
-                live["faders"] = list(mapper.get_fader_levels())
-            except Exception:
-                pass
-            try:
-                enc = mapper.get_encoder_state()
-                live["encoders"] = [e.get("val", 0) for e in enc]
-            except Exception:
-                pass
         try:
-            with sender._lock:
-                d = sender.dmx_data
+            live["faders"] = _depot_fader_levels(sender)
+            d = _line_frame(sender)
+            if d:
                 live["channels"] = {str(i + 1): d[i] for i in range(len(d)) if d[i]}
+                for i in range(4):
+                    ch = _depot_encoder_channel(sender, i + 1)
+                    if ch is not None and 1 <= ch <= len(d):
+                        live["encoders"][i] = d[ch - 1]
         except Exception:
             pass
     return live
@@ -1623,6 +1673,21 @@ def _depot_fader_channel(sender: Any, fader_idx: int):
         try:
             for a in getattr(mapper, "_map", {}).get("faders", []):
                 if int(a.get("fader", 0)) == fader_idx and a.get("enabled", True):
+                    ch = a.get("channel")
+                    if isinstance(ch, int) and 1 <= ch <= 512:
+                        return ch
+        except Exception:
+            pass
+    return None
+
+
+def _depot_encoder_channel(sender: Any, encoder_idx: int):
+    """Канал, на который роутится энкодер N в АКТИВНОМ пресете роутинга."""
+    mapper = getattr(sender, "_mapper", None)
+    if mapper is not None:
+        try:
+            for a in getattr(mapper, "_map", {}).get("encoders", []):
+                if int(a.get("encoder", 0)) == encoder_idx and a.get("enabled", True):
                     ch = a.get("channel")
                     if isinstance(ch, int) and 1 <= ch <= 512:
                         return ch
@@ -1886,15 +1951,12 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
             {"type": "blackout_state",
              "payload": {"set": 1 if sender._blackout else 0}},
             ensure_ascii=False))
-        with sender._lock:
-            # Снапшот физических фейдеров по АКТИВНОЙ карте (13.08): карта
-            # теперь шлёт фейдеры в каналы COB-раскладки 200-205/201-204, а не 1-8
-            mapper = getattr(sender, "_mapper", None)
-            if mapper is not None:
-                wing_lv = mapper.get_fader_levels()
-            else:
-                buf = sender._sources.get(LOCAL_SOURCE, bytearray(512))
-                wing_lv = list(buf[0:8])
+        # Снапшот фейдеров по АКТИВНОЙ карте из кадра, уходящего в линию
+        # (15.08): крыло и веб-панели — одна поверхность (LOCAL_SOURCE,
+        # last-write-wins), поэтому показываем ОБЩЕЕ состояние, а не физическое
+        # положение фейдеров крыла. Пустые (немапленные) фейдеры — физическая
+        # позиция крыла, чтобы они двигались на вебе как на крыле.
+        wing_lv = _depot_fader_levels(sender)
         await ws.send_str(json.dumps(
             {"type": "wing_levels", "payload": wing_lv}, ensure_ascii=False))
 
@@ -2095,9 +2157,13 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                         elif "leds" in payload:
                             sender.set_leds(payload["leds"])
                 elif isinstance(data, dict) and "ch" in data and "val" in data:
+                    # 15.08: веб-панель = та же ручная поверхность, что крыло —
+                    # пишем в общий LOCAL_SOURCE (last-write-wins), а не в
+                    # per-client. Поднятое крылом убирается с панели и наоборот,
+                    # все веб-версии видят одно состояние через depot_live.
                     if os.environ.get("LUMINA_WS_LOG") == "1":
-                        logging.getLogger("lumina_ws").info("ws-single src=%s ch=%d v=%d", src, data.get("ch", -1), data.get("val", -1))
-                    sender.set_channel(int(data["ch"]) - 1, data["val"], src)
+                        logging.getLogger("lumina_ws").info("ws-single src=LOCAL ch=%d v=%d", data.get("ch", -1), data.get("val", -1))
+                    sender.set_channel(int(data["ch"]) - 1, data["val"], LOCAL_SOURCE)
                     # Синхронизация веб-версий: живое состояние -> всем (троттл).
                     schedule_depot_live_broadcast(app)
                 elif isinstance(data, dict) and data.get("type") == "blackout":
