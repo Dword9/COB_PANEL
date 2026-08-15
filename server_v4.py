@@ -113,6 +113,13 @@ async def cors_middleware(request: web.Request, handler):
 # Ключ источника для железа (фейдеры/энкодеры/кнопки самого крыла): его
 # вклад в HTP-микс живёт отдельно от WS-клиентов и не сбрасывается с ними.
 LOCAL_SOURCE = "wing-local"
+# Ключ источника для ЕДИНОГО ДЕПО (14.08): общий «программируемый» буфер
+# (live-раздел депо). Все веб-версии пишут сюда — это один слепок состояния,
+# в отличие от per-client буферов (ws:*) для консоли.
+DEPOT_SOURCE = "depot-live"
+# Как часто рассылать live-раздел депо при изменениях каналов (синхронизация
+# всех веб-версий между собой; полный слепок depot_state — только по запросу).
+DEPOT_LIVE_TTL = 0.2
 
 
 class WingSender:
@@ -1531,6 +1538,177 @@ def apply_routing_to_sender(sender: Any) -> None:
         sender.apply_routing(routing_map)
 
 
+# ========== ЕДИНОЕ ДЕПО КРЫЛА (14.08) ==========
+# Один слепок-источник правды для физ. крыла и ВСЕХ веб-версий (в т.ч.
+# удалённых). Программируем ДЕПО, а не каждую сущность отдельно:
+#   routing  — DMX-роутинг (фейдеры/энкодеры/кнопки -> каналы), «прошивка»
+#   scenes   — сцены/шаблоны пульта (scene mapping)
+#   playback — настройки плейбэков/сцен (playback mapping, на будущее)
+#   live     — зеркало текущих значений (физ. фейдеры/энкодеры/кнопки)
+# Правки из любой веб-версии (и из крыла) -> депо -> бродкаст всем клиентам,
+# включая удалённые. Routing/scenes живут в своих сторах (routing_store.json /
+# scenes_store.json), playback — в wing_depot.json; live — вычисляется на лету.
+WING_DEPOT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wing_depot.json")
+
+
+def load_wing_depot() -> Dict:
+    default = {"playback": {}}
+    try:
+        if os.path.exists(WING_DEPOT_PATH):
+            with open(WING_DEPOT_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return {"playback": data.get("playback", {})}
+    except Exception as e:
+        logging.warning("Не удалось прочитать депо крыла (%s): %s", WING_DEPOT_PATH, e)
+    return default
+
+
+def save_wing_depot() -> None:
+    try:
+        with open(WING_DEPOT_PATH, "w", encoding="utf-8") as f:
+            json.dump(WING_DEPOT, f, ensure_ascii=False, indent=1)
+    except Exception as e:
+        logging.warning("Не удалось сохранить депо крыла (%s): %s", WING_DEPOT_PATH, e)
+
+
+WING_DEPOT = load_wing_depot()
+
+
+def _wing_depot_live(sender: Any) -> Dict:
+    """Зеркало текущих значений крыла (live-раздел депо).
+
+    faders/encoders/buttons — физическое крыло (по активной карте роутинга);
+    channels — ИТОГОВЫЙ микс (dmx_data): то, что реально на линии, т.е. единый
+    слепок для всех веб-версий. Каждая веб-панель пишет в СВОЙ per-client
+    источник (single {ch,val}), депо лишь ОТРАЖАЕТ результат HTP — иначе общий
+    буфер дал бы last-write-wins и панели затирали бы друг друга.
+    """
+    live = {"faders": [0] * 8, "encoders": [0] * 4, "buttons": {}, "channels": {}}
+    if isinstance(sender, WingSender):
+        mapper = getattr(sender, "_mapper", None)
+        if mapper is not None:
+            try:
+                live["faders"] = list(mapper.get_fader_levels())
+            except Exception:
+                pass
+            try:
+                enc = mapper.get_encoder_state()
+                live["encoders"] = [e.get("val", 0) for e in enc]
+            except Exception:
+                pass
+        try:
+            with sender._lock:
+                d = sender.dmx_data
+                live["channels"] = {str(i + 1): d[i] for i in range(len(d)) if d[i]}
+        except Exception:
+            pass
+    return live
+
+
+def wing_depot_payload(sender: Any) -> Dict:
+    """Полный слепок депо для клиентов."""
+    return {
+        "routing": ROUTING_STORE,
+        "scenes": SCENE_STORE,
+        "playback": WING_DEPOT.get("playback", {}),
+        "live": _wing_depot_live(sender),
+    }
+
+
+def _depot_fader_channel(sender: Any, fader_idx: int):
+    """Канал, на который роутится фейдер N в АКТИВНОМ пресете роутинга."""
+    mapper = getattr(sender, "_mapper", None)
+    if mapper is not None:
+        try:
+            for a in getattr(mapper, "_map", {}).get("faders", []):
+                if int(a.get("fader", 0)) == fader_idx and a.get("enabled", True):
+                    ch = a.get("channel")
+                    if isinstance(ch, int) and 1 <= ch <= 512:
+                        return ch
+        except Exception:
+            pass
+    return None
+
+
+def _depot_button_channel(sender: Any, button_id: int):
+    """Канал, на который замаплена кнопка крыла в активном пресете роутинга."""
+    mapper = getattr(sender, "_mapper", None)
+    if mapper is not None:
+        try:
+            b = getattr(mapper, "_map", {}).get("buttons", {}).get(str(button_id))
+            if b is not None:
+                ch = b.get("channel")
+                if isinstance(ch, int) and 1 <= ch <= 512:
+                    return ch
+        except Exception:
+            pass
+    return None
+
+
+def broadcast_depot_state(app: web.Application, exclude=None) -> None:
+    """Депо -> всем подключённым UI-клиентам (в т.ч. удалённым)."""
+    sender = app.get("artnet")
+    loop = app.get("loop")
+    if loop is None:
+        return
+    msg = json.dumps({"type": "depot_state", "payload": wing_depot_payload(sender)},
+                     ensure_ascii=False)
+
+    async def _send():
+        for ws in list(UI_CLIENTS):
+            if ws is exclude:
+                continue
+            try:
+                await ws.send_str(msg)
+            except Exception:
+                UI_CLIENTS.discard(ws)
+
+    try:
+        asyncio.run_coroutine_threadsafe(_send(), loop)
+    except RuntimeError:
+        pass
+
+
+def schedule_depot_live_broadcast(app: web.Application) -> None:
+    """Троттл-бродкаст live-раздела депо (синхронизация веб-версий между
+    собой): при любом изменении каналов (single-запись с панели, крыло) —
+    не чаще чем раз в DEPOT_LIVE_TTL, чтобы веб-панели показывали одно и то же.
+    """
+    loop = app.get("loop")
+    if loop is None:
+        return
+    now = time.monotonic()
+    last = app.get("_depot_live_ts", 0.0)
+    if now - last < DEPOT_LIVE_TTL:
+        return
+    app["_depot_live_ts"] = now
+
+    async def _send():
+        try:
+            await asyncio.wait_for(_depot_live_shot(app), timeout=2.0)
+        except Exception:
+            pass
+
+    try:
+        asyncio.run_coroutine_threadsafe(_send(), loop)
+    except RuntimeError:
+        pass
+
+
+async def _depot_live_shot(app: web.Application) -> None:
+    """Отправить всем клиентам live-раздел депо (полный слепок не нужен
+    каждый раз — только «что сейчас на линии» и фейдеры крыла)."""
+    sender = app.get("artnet")
+    msg = json.dumps({"type": "depot_live", "payload": _wing_depot_live(sender)},
+                     ensure_ascii=False)
+    for ws in list(UI_CLIENTS):
+        try:
+            await ws.send_str(msg)
+        except Exception:
+            UI_CLIENTS.discard(ws)
+
+
 def broadcast_routing_store(app: web.Application):
     """Разослать актуальный стор роутинга всем подключённым клиентам."""
     loop = app.get("loop")
@@ -1557,6 +1735,8 @@ def refresh_routing(sender: Any, app: web.Application):
     save_routing_store(ROUTING_STORE)
     broadcast_routing_store(app)
     apply_routing_to_sender(sender)
+    # Единое депо: смена роутинга обновляет полный слепок для всех веб-версий.
+    broadcast_depot_state(app)
 
 
 def broadcast_wing_event(app: web.Application, ev: dict):
@@ -1688,6 +1868,10 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
     # Пульту — пресеты роутинга крыла (активный + список) на момент подключения
     await ws.send_str(json.dumps(
         {"type": "route_store", "payload": ROUTING_STORE}, ensure_ascii=False))
+    # Единое депо крыла (14.08): полный слепок (routing+scenes+playback+live)
+    # для новых/удалённых экземпляров — дальше правки идут дельтами depot_state.
+    await ws.send_str(json.dumps(
+        {"type": "depot_state", "payload": wing_depot_payload(sender)}, ensure_ascii=False))
     # Пульту — текущие уровни физических фейдеров крыла (обратная связь,
     # 05.08: веб-панель показывает/дублирует движение крыла). Снапшот на
     # подключение, дальше — дельта-события wing_input.
@@ -1789,6 +1973,99 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                                 SCENE_STORE["active"] = ""
                             save_scene_store(SCENE_STORE)
                             broadcast_scene_store(app)
+                elif isinstance(data, dict) and data.get("type") == "depot_get":
+                    # Запрос полного слепка депо (удалённая/поздняя панель)
+                    await ws.send_str(json.dumps(
+                        {"type": "depot_state", "payload": wing_depot_payload(sender)},
+                        ensure_ascii=False))
+                elif isinstance(data, dict) and data.get("type") == "depot_set":
+                    # Программирование ЕДИНОГО ДЕПО (14.08): правка любого раздела
+                    # (routing/scenes/playback/live) из любой веб-версии -> слепок
+                    # применяется и бродкастится всем клиентам, включая удалённые.
+                    section = str(data.get("section") or "")
+                    payload = data.get("payload") or {}
+                    if section == "routing":
+                        rmap = payload if isinstance(payload, dict) else {}
+                        name = str(rmap.get("name") or "").strip()
+                        rpresets = ROUTING_STORE.setdefault("presets", {})
+                        if name and isinstance(rmap.get("map"), dict):
+                            rpresets[name] = rmap["map"]
+                            ROUTING_STORE["active"] = name
+                            refresh_routing(sender, app)
+                        elif name and name in rpresets:
+                            ROUTING_STORE["active"] = name
+                            refresh_routing(sender, app)
+                    elif section == "scenes":
+                        snap = sanitize_snap(payload.get("snap"))
+                        idx = payload.get("idx")
+                        if snap is not None and idx is not None:
+                            cur = scene_active_template()
+                            SCENE_STORE["templates"][cur][str(int(idx))] = snap
+                            save_scene_store(SCENE_STORE)
+                            broadcast_scene_store(app)
+                    elif section == "playback":
+                        WING_DEPOT["playback"] = payload if isinstance(payload, dict) else {}
+                        save_wing_depot()
+                    elif section == "live":
+                        # Зеркало депо -> DMX: живые значения (фейдеры/энкодеры/
+                        # кнопки), программ-управление из веб-панели. Пишется в
+                        # общий DEPOT_SOURCE (один слепок для всех веб-версий).
+                        if isinstance(payload, dict):
+                            channels = payload.get("channels")
+                            if isinstance(channels, dict):
+                                # Прямое программирование каналов из веб-панели
+                                # в общий буфер депо (DEPOT_SOURCE) — единый слепок
+                                # для всех веб-версий.
+                                for k, v in channels.items():
+                                    try:
+                                        ch = int(k)
+                                    except (TypeError, ValueError):
+                                        continue
+                                    if 1 <= ch <= 512 and isinstance(v, (int, float)):
+                                        sender.set_channel(ch - 1, int(v), DEPOT_SOURCE)
+                            faders = payload.get("faders")
+                            if isinstance(faders, dict):
+                                for k, v in faders.items():
+                                    try:
+                                        i = int(k)
+                                    except (TypeError, ValueError):
+                                        continue
+                                    if 1 <= i <= 8 and isinstance(v, (int, float)):
+                                        ch = _depot_fader_channel(sender, i)
+                                        if ch is not None:
+                                            sender.set_channel(ch - 1, int(v), DEPOT_SOURCE)
+                            elif isinstance(faders, list):
+                                for i, v in enumerate(faders[:8]):
+                                    if isinstance(v, (int, float)):
+                                        ch = _depot_fader_channel(sender, i + 1)
+                                        if ch is not None:
+                                            sender.set_channel(ch - 1, int(v), DEPOT_SOURCE)
+                            encoders = payload.get("encoders")
+                            if isinstance(encoders, dict):
+                                for k, v in encoders.items():
+                                    try:
+                                        i = int(k)
+                                    except (TypeError, ValueError):
+                                        continue
+                                    if 1 <= i <= 4 and isinstance(v, (int, float)):
+                                        sender.set_channel(40 + i - 1, int(v), DEPOT_SOURCE)
+                            elif isinstance(encoders, list):
+                                for i, v in enumerate(encoders[:4]):
+                                    if isinstance(v, (int, float)):
+                                        sender.set_channel(40 + i, int(v), DEPOT_SOURCE)
+                            buttons = payload.get("buttons")
+                            if isinstance(buttons, dict):
+                                for bid, v in buttons.items():
+                                    try:
+                                        cfg = _depot_button_channel(sender, int(bid))
+                                    except (TypeError, ValueError):
+                                        cfg = None
+                                    if cfg is not None and isinstance(v, (int, float)):
+                                        sender.set_channel(cfg - 1, 255 if v else 0, DEPOT_SOURCE)
+                    # Живое состояние -> всем веб-версиям (троттл), чтобы слепок
+                    # обновился и у автора (broadcast_depot_state его исключает).
+                    schedule_depot_live_broadcast(app)
+                    broadcast_depot_state(app, exclude=ws)
                 elif isinstance(data, dict) and data.get("type") in ("route_save", "route_load", "route_del"):
                     # Пресеты роутинга крыла: смена маппинга вживую, без рестарта.
                     mtype = data.get("type")
@@ -1821,6 +2098,8 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                     if os.environ.get("LUMINA_WS_LOG") == "1":
                         logging.getLogger("lumina_ws").info("ws-single src=%s ch=%d v=%d", src, data.get("ch", -1), data.get("val", -1))
                     sender.set_channel(int(data["ch"]) - 1, data["val"], src)
+                    # Синхронизация веб-версий: живое состояние -> всем (троттл).
+                    schedule_depot_live_broadcast(app)
                 elif isinstance(data, dict) and data.get("type") == "blackout":
                     sender.set_blackout(bool(data.get("set")))
                     logging.getLogger("lumina_ws").info("blackout %s (src=%s)", "ON" if data.get("set") else "OFF", src)

@@ -1240,13 +1240,20 @@
         document.querySelectorAll('.vert').forEach(function (fader) {
             fader.addEventListener('input', function () {
                 var ch = idToCh(fader.id);
+                if (ch) lockDepotCh(ch);
                 if (ch === 200) apply(); else sendChan(ch);
             });
             fader.addEventListener('wheel', function () {
+                var ch = idToCh(fader.id);
+                if (ch) lockDepotCh(ch);
                 sendChan(idToCh(fader.id));
             });
             fader.addEventListener('mousedown', function (e) {
-                if (e.button === 1 || e.button === 2) sendChan(idToCh(fader.id));
+                if (e.button === 1 || e.button === 2) {
+                    var ch = idToCh(fader.id);
+                    if (ch) lockDepotCh(ch);
+                    sendChan(idToCh(fader.id));
+                }
             });
         });
 
@@ -1445,6 +1452,52 @@
             setRaw(ch, Math.max(0, Math.min(255, parseInt(v, 10) || 0)));
         }
 
+        // --- Единое депо крыла (14.08): живой слепок для всех веб-версий ---
+        // Показываем ОБЩЕЕ состояние (итоговый микс + фейдеры крыла), а не
+        // своё локальное. Защита от обратной связи: свой недавно тронутый
+        // фейдер не трогаем (DEPOT_LOCK_MS после input).
+        var DEPOT_LOCK_MS = 600;
+        var depotLock = {};
+        function lockDepotCh(ch) {
+            depotLock[ch] = Date.now();
+        }
+        function depotLocked(ch) {
+            return (depotLock[ch] || 0) + DEPOT_LOCK_MS > Date.now();
+        }
+        function applyDepotLive(live) {
+            if (!live) return;
+            if (live.channels && typeof live.channels === 'object') {
+                for (var ch in live.channels) {
+                    var chId = parseInt(ch, 10);
+                    if (chId && !depotLocked(chId)) {
+                        var f = chToId(chId);
+                        if (f) setRaw(chId, Math.max(0, Math.min(255, parseInt(live.channels[ch], 10) || 0)));
+                    }
+                }
+            }
+            if (Array.isArray(live.faders)) {
+                live.faders.forEach(function (v, i) {
+                    var fch = WING_MAP[i + 1];
+                    if (fch && !depotLocked(fch)) wingFaderTo(i + 1, v);
+                });
+            }
+            if (live.encoders && Array.isArray(live.encoders) && window.__setEncVal) {
+                live.encoders.forEach(function (v, i) {
+                    if (i < 4 && (encLast[i] === undefined || encLast[i] !== v)) {
+                        window.__setEncVal(i, v);
+                        encLast[i] = v;
+                    }
+                });
+            }
+        }
+        function applyPlayback(pb) {
+            // Playback-маппинг (на будущее): принять настройки пульта.
+            // Сейчас только логируем — применение в UI добавим с картой.
+            if (pb && typeof pb === 'object' && Object.keys(pb).length) {
+                log('Playback: ' + Object.keys(pb).length + ' назначений из депо');
+            }
+        }
+
         // Физические кнопки крыла -> кнопки панели (сбор 13.08, полный):
         // keypad-цифры: 66=0 58=1 59=2 60=3 50=4 51=5 52=6 42=7 43=8 44=9;
         // функции: 126=Go+ 119=Go- 64=Store 57=Clear 70=Please 45=+ 53=Thru
@@ -1583,6 +1636,17 @@
                     renderThumbs();
                 } else if (d.type === 'route_store' && d.payload) {
                     fillRoutes(d.payload);
+                } else if (d.type === 'depot_state' && d.payload) {
+                    // Единое депо крыла (14.08): полный слепок (routing+scenes+
+                    // playback+live) для всех веб-версий, в т.ч. удалённых.
+                    if (d.payload.routing) fillRoutes(d.payload.routing);
+                    if (d.payload.scenes) fillScenes(d.payload.scenes);
+                    if (d.payload.playback) applyPlayback(d.payload.playback);
+                    if (d.payload.live) applyDepotLive(d.payload.live);
+                } else if (d.type === 'depot_live' && d.payload) {
+                    // Живой слепок (троттл): синхронизация всех веб-панелей —
+                    // показываем общее состояние, а не своё локальное.
+                    applyDepotLive(d.payload);
                 } else if (d.type === 'wing_levels' && Array.isArray(d.payload)) {
                     d.payload.forEach(function (v, i) { wingFaderTo(i + 1, v); });
                 } else if (d.type === 'wing_input' && d.payload && d.payload.kind === 'fader' && d.payload.id !== undefined) {
