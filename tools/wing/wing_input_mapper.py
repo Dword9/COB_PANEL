@@ -96,6 +96,7 @@ class WingInputMapper:
         self._map = {"faders": [], "encoders": [], "buttons": {}}
         self._dmx = {1: bytearray(512), 2: bytearray(512)}
         self._last_faders = [None] * 8
+        self._fader_display = [0] * 8  # 0..255 позиции ВСЕХ фейдеров (вкл. пустые/немапленные) для UI-зеркала
         self._last_enc_raw = [None] * 4
         self._enc_value = [0, 0, 0, 0]  # virtual 0..255 positions
         self._enc_zero = [None] * 4  # калибровка текущей USB-сессии: raw = «12 часов» = 0
@@ -136,6 +137,7 @@ class WingInputMapper:
             "buttons": dict(mp.get("buttons", {})),
         }
         self._last_faders = [None] * 8
+        self._fader_display = [0] * 8
         self._last_enc_raw = [None] * 4
         self._enc_value = [0, 0, 0, 0]
         logger.info("Карта роутинга крыла заменена на лету")
@@ -179,6 +181,12 @@ class WingInputMapper:
                 buf = self._dmx.get(a.get("universe", 1))
                 out.append(buf[ch - 1] if buf else 0)
         return out
+
+    def get_fader_display(self) -> list:
+        """0..255 позиции ВСЕХ фейдеров крыла (вкл. пустые/немапленные):
+        последние считанные физические положения — для UI-зеркала, чтобы
+        веб показывал движение фейдеров даже без DMX-канала."""
+        return list(self._fader_display)
 
     # ---------- DMX buffer access (for WingSender) ----------
     def get_frame(self, universe: int) -> bytes:
@@ -226,6 +234,7 @@ class WingInputMapper:
             in_min = a.get("in_min", 0)
             in_max = a.get("in_max", FADER_RAW_MAX)
             out = self._scale(raw, in_min, in_max)
+            self._fader_display[idx] = out
             self._event("fader", idx + 1, out)
             if not a.get("enabled", True):
                 continue
