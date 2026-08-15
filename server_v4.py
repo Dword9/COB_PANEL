@@ -2429,6 +2429,8 @@ async def debug_dmx_handler(request: web.Request):
         "ch_500_512": data[499:512],
         # Что реально ушло в линию (в bypass = только LOCAL_SOURCE крыла)
         "sent_200_210": sent[199:210],
+        "console_200_210": list(sender._sources.get(CONSOLE_SOURCE, bytes(512))[199:210]) if CONSOLE_AVAILABLE else None,
+        "console_active": (lambda e: (e.active_num, e.masters.get("dimmer"), e.mode) if e is not None else None)(getattr(sender, "console_engine", None)),
         "wing_dev": "yes" if (sender._wing and sender._wing.dev) else "no",
         "wing_led": (lambda lb: {"nonzero": sum(1 for i in range(0, 260, 2) if int.from_bytes(lb[i:i + 2], "little")), "sum": sum(int.from_bytes(lb[i:i + 2], "little") for i in range(0, 260, 2))})(bytes(sender._wing.led_body) if sender._wing else b""),
         "wing_wave_enabled": sender._wing_wave_enabled,

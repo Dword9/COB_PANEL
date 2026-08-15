@@ -1372,7 +1372,7 @@
             b.addEventListener('click', function () {
                 if (key === 'store') sendConsole({ action: 'store', on: 1 });
                 else if (key === 'clear') sendConsole({ action: 'clear' });
-                else if (key === 'alt') sendConsole({ action: 'alt', on: 1 });
+                else if (key === 'alt') sendConsole({ action: 'alt', on: consoleMode === 'alt' ? 0 : 1 });
                 else if (key === 'go_plus') sendConsole({ action: 'page', dir: 1 });
                 else if (key === 'go_minus') sendConsole({ action: 'page', dir: -1 });
             });
