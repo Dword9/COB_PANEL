@@ -154,6 +154,10 @@ class WingSender:
         # Серверный blackout (14.08): клиент/крыло шлют {type:'blackout'},
         # пока флаг поднят — в DMX уходит нулевой кадр, поверх HTP-микса.
         self._blackout = False
+        # DIMPLE GLOW (15.08): настройка панели COB ({type:'dimple_glow'}).
+        # Включено — LED-тело крыла гаснет в ЛЮБОМ состоянии bypass;
+        # выключено — лёгкий backlight телу. По умолчанию ВЫКЛ = светится.
+        self._dimple_glow = False
         # Bypass (14.08): Lumina не генерирует сигналов на линии (отладка
         # COB-панели). При включении уходит один нулевой кадр (приборы
         # гаснут и держат ноль), дальше линия молчит — приборы не реагируют.
@@ -215,10 +219,11 @@ class WingSender:
           "bar"   — один общий уровень = max полос, слева направо по words;
           "bands" — отдельный столбик на каждую полосу low/mid/high.
         """
-        if self._bypass:
+        if self._bypass or self._dimple_glow:
             # Bypass (14.08): индикация из Lumina на крыло не уходит —
             # VU-бары UI молчат, остаётся только собственный VU крыла
-            # (линейный вход, прошивка).
+            # (линейный вход, прошивка). DIMPLE GLOW (15.08): тело тёмное,
+            # VU не рисуется.
             return
         if self._wing is None:
             return
@@ -382,6 +387,7 @@ class WingSender:
             logging.warning("Аппаратный маппинг крыла не активен: %s", e)
         try:
             self._wing.start()
+            self._sync_wing_leds()
             self._maybe_wave()
         except Exception as e:
             # Крыло физически не найдено. Если оно есть, но занято
@@ -416,6 +422,7 @@ class WingSender:
                     # панели. Перезапускаем сессию, чтобы вернуть и ввод (14.08).
                     self._wing.start()
                     logging.info("Крыло подключено (ввод восстановлен)")
+                    self._sync_wing_leds()
                     self._maybe_wave()
                 with self._lock:
                     # Лок держим только на чтение буфера — отправка и sleep
@@ -440,6 +447,8 @@ class WingSender:
                                 if v > manual[i]:
                                     manual[i] = v
                         frame = bytes(manual)
+                        if self._blackout:
+                            frame = bytes(len(frame))
                     else:
                         self._bypass_zeroed = False
                         send_zero = False
@@ -456,6 +465,7 @@ class WingSender:
                 try:
                     self._wing.start()
                     logging.info("Крыло переподключено")
+                    self._sync_wing_leds()
                     self._maybe_wave()
                 except Exception as e2:
                     logging.error("Переподключение не удалось: %s", e2)
@@ -514,6 +524,32 @@ class WingSender:
         with self._lock:
             self._blackout = bool(on)
 
+    def _apply_backlight(self) -> None:
+        """Лёгкий backlight LED-тела крыла (15.08): светится, пока DIMPLE
+        GLOW выключен — в любом состоянии bypass. VU-бары в обычном режиме
+        и волна (restore) рисуют поверх, сам baseline не сбрасывается."""
+        if self._wing is None:
+            return
+        self._wing.fill_leds(int(2047 * 0.08))
+
+    def _sync_wing_leds(self) -> None:
+        """LED-тело крыла в соответствие текущей настройке: DIMPLE GLOW
+        = тёмное, иначе лёгкий backlight. Вызов под self._lock."""
+        if self._wing is None:
+            return
+        if self._dimple_glow:
+            self._wing.clear_leds()
+        else:
+            self._apply_backlight()
+
+    def set_dimple_glow(self, on: bool) -> None:
+        """DIMPLE GLOW (15.08): панель COB шлёт настройку {type:'dimple_glow'}.
+        Включено — крыло гаснет (LED-тело тёмное) в любом состоянии bypass;
+        выключено — лёгкий backlight телу крыла."""
+        with self._lock:
+            self._dimple_glow = bool(on)
+            self._sync_wing_leds()
+
     def set_bypass(self, on: bool) -> None:
         """Bypass (14.08): линия замолкает (нулевой кадр один раз при включении).
 
@@ -525,11 +561,10 @@ class WingSender:
             if not on:
                 self._bypass_zeroed = False
             elif self._wing is not None:
-                # Гасим и индикацию крыла: кнопки не должны показывать уровни
-                # из Lumina, пока линия в bypass (жалоба 14.08). Нулевой
-                # led_body уйдёт в крыло вместе с нулевым кадром из send-цикла,
-                # дальше CTL-пакеты не отправляются — индикация молчит.
-                self._wing.clear_leds()
+                # Индикация крыла в bypass: тело НЕ гасится безусловно —
+                # тёмным оно бывает ТОЛЬКО при DIMPLE GLOW (15.08), иначе
+                # остаётся лёгкий backlight (жалоба «крыло темное»).
+                self._sync_wing_leds()
 
     def apply_routing(self, routing_map: dict) -> None:
         """Живо применить пресет роутинга крыла (фейдеры/энкодеры/кнопки).
@@ -1595,6 +1630,8 @@ def _line_frame(sender: WingSender) -> bytes:
                     v = b[i]
                     if v > frame[i]:
                         frame[i] = v
+            if sender._blackout:
+                return bytes(len(frame))
             return bytes(frame)
         frame = bytes(sender.dmx_data)
         if sender._blackout:
@@ -1852,6 +1889,35 @@ def broadcast_wing_wave_state(app: web.Application):
         pass
 
 
+def broadcast_dimple_glow_state(app: web.Application, exclude=None):
+    """Синхронизация DIMPLE GLOW между панелями (15.08): сервер-авторитет.
+    Любая панель, переключившая тумблер, шлёт {type:'dimple_glow'} — сервер
+    применяет к крылу и рассылает всем остальным, чтобы все панели показывали
+    ОДИН общий стейт (единое депо), а не локальный. exclude — ws источника."""
+    sender = app.get("artnet")
+    on = bool(getattr(sender, "_dimple_glow", False)) if isinstance(sender, WingSender) else False
+    loop = app.get("loop")
+    msg = json.dumps({"type": "dimple_glow_state", "payload": {"on": 1 if on else 0}},
+                     ensure_ascii=False)
+
+    async def _send():
+        for ws in list(UI_CLIENTS):
+            if ws is exclude:
+                continue
+            try:
+                await ws.send_str(msg)
+            except Exception:
+                UI_CLIENTS.discard(ws)
+
+    if loop is None:
+        asyncio.ensure_future(_send())
+        return
+    try:
+        asyncio.run_coroutine_threadsafe(_send(), loop)
+    except RuntimeError:
+        pass
+
+
 def broadcast_blackout_state(app: web.Application, exclude=None):
     """Синхронизация блекаута между панелями (14.08): мигающая B на экранчике
     у ВСЕХ клиентов, а не только у того, кто включил. exclude — ws источника
@@ -1950,6 +2016,12 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
         await ws.send_str(json.dumps(
             {"type": "blackout_state",
              "payload": {"set": 1 if sender._blackout else 0}},
+            ensure_ascii=False))
+        # Пульту — текущее состояние DIMPLE GLOW (15.08: сервер-авторитет,
+        # все панели приходят к одному общему стейту подсветки крыла)
+        await ws.send_str(json.dumps(
+            {"type": "dimple_glow_state",
+             "payload": {"on": 1 if sender._dimple_glow else 0}},
             ensure_ascii=False))
         # Снапшот фейдеров по АКТИВНОЙ карте из кадра, уходящего в линию
         # (15.08): крыло и веб-панели — одна поверхность (LOCAL_SOURCE,
@@ -2173,6 +2245,10 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                 elif isinstance(data, dict) and data.get("type") == "bypass":
                     sender.set_bypass(bool(data.get("set")))
                     logging.getLogger("lumina_ws").info("bypass %s (src=%s)", "ON" if data.get("set") else "OFF", src)
+                elif isinstance(data, dict) and data.get("type") == "dimple_glow":
+                    sender.set_dimple_glow(bool(data.get("on")))
+                    logging.getLogger("lumina_ws").info("dimple_glow %s (src=%s)", "ON" if data.get("on") else "OFF", src)
+                    broadcast_dimple_glow_state(request.app, exclude=ws)
                 elif isinstance(data, dict) and data.get("type") == "enc_reset":
                     # Сброс энкодера с панели: 12 часов = 0 (договорённость 14.08).
                     # Только панель сбрасывает, крыло права сброса не имеет.
@@ -2234,6 +2310,7 @@ async def debug_dmx_handler(request: web.Request):
         "wing_wave_enabled": sender._wing_wave_enabled,
         "blackout": sender._blackout,
         "bypass": sender._bypass,
+        "dimple_glow": sender._dimple_glow,
         "encoders": sender._mapper.get_encoder_state() if sender._mapper else [],
         "clients": len(UI_CLIENTS),
         # Сколько ненулевых каналов держит каждый источник в HTP-миксе:
