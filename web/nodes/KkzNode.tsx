@@ -123,7 +123,11 @@ export const KkzNode = ({ data, id, selected }: any) => {
     };
     init();
     const t = setInterval(loadStatus, 2000);
-    return () => { alive = false; clearInterval(t); };
+    // Chromium throttles background timers to ~1/min when the window is
+    // hidden in the tray; poll immediately when the window becomes visible.
+    const onVis = () => { if (document.visibilityState === 'visible') loadStatus(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { alive = false; clearInterval(t); document.removeEventListener('visibilitychange', onVis); };
   }, [api, loadStatus, persist]);
 
   const run = useCallback(async (fn: () => Promise<void>) => {

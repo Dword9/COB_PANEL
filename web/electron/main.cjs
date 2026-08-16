@@ -28,6 +28,7 @@ const ALLOWED_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 let mainWindow = null;
 let tray = null;
 let isQuitting = false;
+let kkzCache = null; // cached KKZ light state, refreshed in background
 
 // ---------------------------------------------------------------------------
 // Window state persistence (position + size), no external deps
@@ -218,13 +219,20 @@ function createTray() {
 
   // refresh the menu each time it opens (KKZ status + autostart checkbox)
   const refreshMenu = async () => {
-    let kkzOn = null;
-    try { kkzOn = await kkzGetStatus(); } catch { kkzOn = null; }
-    tray.setContextMenu(buildMenu(kkzOn));
+    try { kkzCache = await kkzGetStatus(); } catch { kkzCache = null; }
+    tray.setContextMenu(buildMenu(kkzCache));
   };
   tray.setContextMenu(buildMenu(null));
   tray.on('click', toggleWindow);
-  tray.on('right-click', refreshMenu);
+  // Windows shows the currently-set menu on right-click; rebuild first so the
+  // KKZ item is always fresh on the FIRST click (not the second).
+  tray.on('right-click', async () => {
+    await refreshMenu();
+    tray.popUpContextMenu(buildMenu(kkzCache));
+  });
+  // Background refresh keeps the cached state warm even without menu opens.
+  setInterval(refreshMenu, 5000);
+  refreshMenu();
 }
 
 // ---------------------------------------------------------------------------
