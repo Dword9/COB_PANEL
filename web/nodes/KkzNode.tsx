@@ -64,10 +64,16 @@ export const KkzNode = ({ data, id, selected }: any) => {
 
   const api = useCallback(async (path: string, opts: RequestInit = {}): Promise<any> => {
     const headers: Record<string, string> = { 'X-Pin': pinRef.current, ...(opts.headers as Record<string, string> || {}) };
-    const res = await fetch(`${urlRef.current}${path}`, { ...opts, headers });
-    if (res.status === 403) throw new Error('Неверный PIN');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 4000);
+    try {
+      const res = await fetch(`${urlRef.current}${path}`, { ...opts, headers, signal: ctrl.signal });
+      if (res.status === 403) throw new Error('Неверный PIN');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    } finally {
+      clearTimeout(timer);
+    }
   }, []);
 
   const batch = useCallback(async (devices: number[], on: boolean, source: string) => {

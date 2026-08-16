@@ -75,21 +75,34 @@ const KKZ_URL = 'https://kkz-button.207.174.31.143.sslip.io:8445';
 const KKZ_PIN = '3033';
 
 async function kkzSetPower(on) {
-  const res = await fetch(`${KKZ_URL}/api/batch`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Pin': KKZ_PIN },
-    body: JSON.stringify({ devices: [0, 1], on, source: 'tray' }),
-  });
-  if (!res.ok) throw new Error(`KKZ HTTP ${res.status}`);
-  return res.json();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 4000);
+  try {
+    const res = await fetch(`${KKZ_URL}/api/batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Pin': KKZ_PIN },
+      body: JSON.stringify({ devices: [0, 1], on, source: 'tray' }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new Error(`KKZ HTTP ${res.status}`);
+    return res.json();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function kkzGetStatus() {
-  const res = await fetch(`${KKZ_URL}/api/status`, { headers: { 'X-Pin': KKZ_PIN } });
-  if (!res.ok) throw new Error(`KKZ HTTP ${res.status}`);
-  const list = await res.json();
-  // Свет «включён», если включён хотя бы один автомат
-  return Array.isArray(list) && list.some((d) => d.on);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 4000);
+  try {
+    const res = await fetch(`${KKZ_URL}/api/status`, { headers: { 'X-Pin': KKZ_PIN }, signal: ctrl.signal });
+    if (!res.ok) throw new Error(`KKZ HTTP ${res.status}`);
+    const list = await res.json();
+    // Свет «включён», если включён хотя бы один автомат
+    return Array.isArray(list) && list.some((d) => d.on);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ---------------------------------------------------------------------------
