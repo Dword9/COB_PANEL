@@ -84,6 +84,14 @@ async function kkzSetPower(on) {
   return res.json();
 }
 
+async function kkzGetStatus() {
+  const res = await fetch(`${KKZ_URL}/api/status`, { headers: { 'X-Pin': KKZ_PIN } });
+  if (!res.ok) throw new Error(`KKZ HTTP ${res.status}`);
+  const list = await res.json();
+  // Свет «включён», если включён хотя бы один автомат
+  return Array.isArray(list) && list.some((d) => d.on);
+}
+
 // ---------------------------------------------------------------------------
 // Backend health check: HTTP GET with a short timeout
 // ---------------------------------------------------------------------------
@@ -163,14 +171,14 @@ function createTray() {
   tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon);
   tray.setToolTip('Lumina Control Center');
 
-  const contextMenu = () => Menu.buildFromTemplate([
+  const buildMenu = (kkzOn) => Menu.buildFromTemplate([
     {
-      label: 'KKZ свет ВКЛ',
-      click: () => { kkzSetPower(true).catch(() => {}); },
-    },
-    {
-      label: 'KKZ свет ВЫКЛ',
-      click: () => { kkzSetPower(false).catch(() => {}); },
+      // Один пункт-переключатель: подпись — текущее состояние, клик —
+      // инверсия. Статус тянется при каждом открытии меню (right-click),
+      // поэтому подпись всегда актуальна.
+      label: kkzOn === null ? 'KKZ свет ...' : (kkzOn ? 'KKZ свет: ВЫКЛ' : 'KKZ свет: ВКЛ'),
+      enabled: kkzOn !== null,
+      click: () => { kkzSetPower(!kkzOn).catch(() => {}); },
     },
     { type: 'separator' },
     {
@@ -195,10 +203,15 @@ function createTray() {
     { label: 'Выход', click: () => { isQuitting = true; app.quit(); } },
   ]);
 
-  tray.setContextMenu(contextMenu());
+  // refresh the menu each time it opens (KKZ status + autostart checkbox)
+  const refreshMenu = async () => {
+    let kkzOn = null;
+    try { kkzOn = await kkzGetStatus(); } catch { kkzOn = null; }
+    tray.setContextMenu(buildMenu(kkzOn));
+  };
+  tray.setContextMenu(buildMenu(null));
   tray.on('click', toggleWindow);
-  // refresh the autostart checkbox each time the menu opens
-  tray.on('right-click', () => tray.setContextMenu(contextMenu()));
+  tray.on('right-click', refreshMenu);
 }
 
 // ---------------------------------------------------------------------------
