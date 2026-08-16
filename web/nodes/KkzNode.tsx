@@ -1,8 +1,17 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Power, Zap, RefreshCw, Settings2, Wifi, WifiOff } from 'lucide-react';
+import { Handle, Position } from '@xyflow/react';
+import { Power, Zap, RefreshCw, Settings2, Wifi, WifiOff, Plug } from 'lucide-react';
+import { renderRegistry } from '../utils/renderRegistry';
 
 const DEFAULT_URL = 'https://kkz-button.207.174.31.143.sslip.io:8445';
 const DEFAULT_PIN = '3033';
+
+// Входной пин (target) для управления с других нод. На строке-переключателе.
+const CtrlIn: React.FC<{ id: string; label: string; top: string; active?: boolean }> = ({ id, label, top, active }) => (
+  <Handle type="target" position={Position.Left} id={id} title={label}
+    style={{ top, left: -14 }}
+    className={active ? '!bg-fuchsia-400 shadow-[0_0_8px_#d946ef]' : '!bg-zinc-600'} />
+);
 
 interface KkzState {
   on: boolean;
@@ -178,6 +187,48 @@ export const KkzNode = ({ data, id, selected }: any) => {
     loadStatus();
   }, [batch, armedIndices, loadStatus]);
 
+  // --- Входы управления с других нод (звук/таймер/LFO) -------------------
+  // Движок шлёт [master, dev0, dev1] каждый кадр; тут сравниваем с прошлым
+  // значением и шлём HTTP ТОЛЬКО по фронту 0↔1 (грабля: автоматы Tuya
+  // работают секундами, молотить их каждым кадром нельзя).
+  const [inActive, setInActive] = useState<[boolean, boolean, boolean]>([false, false, false]);
+  const prevIn = useRef<[number, number, number]>([-1, -1, -1]);
+
+  useEffect(() => {
+    renderRegistry.register(id, (vals: any) => {
+      const v: [number, number, number] = Array.isArray(vals) && vals.length >= 3
+        ? [vals[0], vals[1], vals[2]]
+        : [-1, -1, -1];
+      const prev = prevIn.current;
+      const next: [boolean, boolean, boolean] = [
+        v[0] !== prev[0],
+        v[1] !== prev[1],
+        v[2] !== prev[2],
+      ];
+      prevIn.current = v;
+      if (!next[0] && !next[1] && !next[2]) return;
+
+      setInActive([v[0] >= 0, v[1] >= 0, v[2] >= 0]);
+
+      const send = (devices: number[], on: boolean, src: string) => {
+        if (!devices.length) return Promise.resolve();
+        return batch(devices, on, src).catch(() => { setConnected(false); setError('in-command failed'); });
+      };
+
+      // Вход master-in: ВКЛ все armed / ВЫКЛ все armed (как кнопка мастера)
+      if (next[0] && v[0] >= 0) {
+        const on = v[0] > 127;
+        setMaster(on);
+        persist('master', on);
+        send(armedRef.current.map((a, i) => (a ? i : -1)).filter(i => i >= 0), on, 'in');
+      }
+      // Входы dev-N-in: прямое вкл/выкл конкретного автомата
+      if (next[1] && v[1] >= 0) send([0], v[1] > 127, 'in');
+      if (next[2] && v[2] >= 0) send([1], v[2] > 127, 'in');
+    });
+    return () => renderRegistry.unregister(id);
+  }, [id, batch, persist]);
+
   const applyConfig = () => {
     const u = url.trim().replace(/\/+$/, '');
     if (!u) return;
@@ -303,6 +354,23 @@ export const KkzNode = ({ data, id, selected }: any) => {
           <RefreshCw size={9} />
         </button>
       </div>
+
+      {/* Входы управления с других нод (звук/таймер/LFO): слева по краю.
+          Значения 0-255, порог 128: >127 = ВКЛ, <=127 = ВЫКЛ. Команда
+          уходит только при переходе. */}
+      <div className="mt-3 pt-2 border-t border-zinc-800 flex items-center justify-between text-[8px] font-bold text-zinc-500">
+        <span className="flex items-center gap-1">
+          <Plug size={8} className={inActive[0] ? 'text-fuchsia-400' : 'text-zinc-700'} />
+          УПР. ВХОДЫ
+        </span>
+        <div className="flex gap-2 text-zinc-600">
+          <span className={inActive[1] ? 'text-fuchsia-400' : ''}>авт.1</span>
+          <span className={inActive[2] ? 'text-fuchsia-400' : ''}>авт.2</span>
+        </div>
+      </div>
+      <CtrlIn id="dev-0-in" label="Вход: автомат 1 — прямое вкл/выкл (0-255)" top="62%" active={inActive[1]} />
+      <CtrlIn id="dev-1-in" label="Вход: автомат 2 — прямое вкл/выкл (0-255)" top="74%" active={inActive[2]} />
+      <CtrlIn id="master-in" label="Вход: главный — ВКЛ/ВЫКЛ всех включённых автоматов (0-255)" top="86%" active={inActive[0]} />
     </div>
   );
 };

@@ -1149,6 +1149,18 @@ export const evaluateGraph = (
         });
         break;
       }
+
+      case 'kkz': {
+        // Входы пульта KKZ (управление с других нод — звук, таймер, LFO):
+        // значение — максимум по рёбрам на входе, -1 если вход не подключён.
+        // Нода сама детектит фронты 0↔1 и шлёт HTTP только при переходе.
+        const readIn = (handle: string): number => {
+          const vals = getInputsForHandle(node.id, handle, incomingEdgesByTarget, nodeValues, nodeMap);
+          return vals.length ? Math.max(...vals) : -1;
+        };
+        outputs = [readIn('master-in'), readIn('dev-0-in'), readIn('dev-1-in')];
+        break;
+      }
     }
 
     nodeValues[node.id] = outputs;
