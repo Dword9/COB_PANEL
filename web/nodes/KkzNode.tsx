@@ -2,9 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import { Power, Zap, RefreshCw, Settings2, Wifi, WifiOff, Plug } from 'lucide-react';
 import { renderRegistry } from '../utils/renderRegistry';
-
-const DEFAULT_URL = 'https://kkz-button.207.174.31.143.sslip.io:8445';
-const DEFAULT_PIN = '3033';
+import { kkzFetch, KKZ_URL, KKZ_PIN } from '../electron/kkz-client.mjs';
 
 // Входной пин (target) для управления с других нод. На строке-переключателе.
 const CtrlIn: React.FC<{ id: string; label: string; top: string; active?: boolean }> = ({ id, label, top, active }) => (
@@ -22,8 +20,8 @@ interface KkzState {
 
 export const KkzNode = ({ data, id, selected }: any) => {
   const params = {
-    url: DEFAULT_URL,
-    pin: DEFAULT_PIN,
+    url: KKZ_URL,
+    pin: KKZ_PIN,
     armed: [true, true],
     master: false,
     ...data.params,
@@ -62,18 +60,18 @@ export const KkzNode = ({ data, id, selected }: any) => {
     data.onParamChange?.(id, key, val);
   }, [data, id]);
 
+  // HTTP-клиент общий с треем — kkz-client.mjs (таймаут 4с, 403 → «Неверный
+  // PIN»). URL/PIN берём из текущего состояния ноды (можно менять в настройках).
   const api = useCallback(async (path: string, opts: RequestInit = {}): Promise<any> => {
-    const headers: Record<string, string> = { 'X-Pin': pinRef.current, ...(opts.headers as Record<string, string> || {}) };
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 4000);
-    try {
-      const res = await fetch(`${urlRef.current}${path}`, { ...opts, headers, signal: ctrl.signal });
-      if (res.status === 403) throw new Error('Неверный PIN');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
-    } finally {
-      clearTimeout(timer);
-    }
+    const body = opts.body !== undefined
+      ? (typeof opts.body === 'string' ? JSON.parse(opts.body) : opts.body)
+      : undefined;
+    return kkzFetch(urlRef.current, path, {
+      method: opts.method || 'GET',
+      pin: pinRef.current,
+      body,
+      headers: opts.headers as Record<string, string> | undefined,
+    });
   }, []);
 
   const batch = useCallback(async (devices: number[], on: boolean, source: string) => {

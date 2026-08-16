@@ -29,6 +29,7 @@ import { MidiTrackNode } from './nodes/MidiTrackNode';
 import { MusicTrackNode } from './nodes/MusicTrackNode';
 import { PaletteNode } from './nodes/PaletteNode';
 import { KkzNode } from './nodes/KkzNode';
+import { KKZ_URL, KKZ_PIN } from './electron/kkz-client.mjs';
 import ButtonEdge from './components/ButtonEdge';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
@@ -952,7 +953,7 @@ const FlowWrapper: React.FC = () => {
     if (type === 'midi-track' && !initialData) defaultParams = { ...defaultMidiTrackParams() };
     if (type === 'music-track' && !initialData) defaultParams = { audioUrl: null, audioName: null, analysisUrl: null, analysisName: null, notes: 0, duration: 0 };
     if (type === 'palette' && !initialData) defaultParams = { hue: 0, saturation: 1 };
-    if (type === 'kkz' && !initialData) defaultParams = { url: 'https://kkz-button.207.174.31.143.sslip.io:8445', pin: '3033', armed: [true, true], master: false };
+    if (type === 'kkz' && !initialData) defaultParams = { url: KKZ_URL, pin: KKZ_PIN, armed: [true, true], master: false };
     const newNode: LuminaNode = injectHandlers({ id, type, position: pos || { x: 100, y: 100 }, data: { label: initialData?.label || type.toUpperCase(), type, params: defaultParams } } as LuminaNode);
     setNodes(nds => [...nds, newNode]);
     setMenu(null);

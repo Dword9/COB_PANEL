@@ -14,6 +14,8 @@ export enum ConnectionStatus {
 
 /**
  * Configuration for audio-reactive parameters per channel/fixture
+ * ПОМЕТКА 16.08 (docs/AUDIT.md §2.1): МЁРТВЫЙ код — нигде не читается
+ * (только создаётся в constants.ts для каждой фикстуры). Кандидат на удаление.
  */
 export interface AudioReactiveConfig {
   enabled: boolean;

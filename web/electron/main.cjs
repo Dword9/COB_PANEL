@@ -69,41 +69,25 @@ function saveSetting(key, value) {
 
 // ---------------------------------------------------------------------------
 // KKZ: главный переключатель автоматов из трея (оба устройства).
-// URL/PIN совпадают с дефолтами ноды KkzNode.tsx; armed-состояние живёт в
-// браузере, трею оно неизвестно — дёргаем оба автомата (решение 16.08).
+// URL/PIN и HTTP-клиент — общий модуль kkz-client.mjs (тот же, что в ноде
+// KkzNode.tsx и дефолтах App.tsx); armed-состояние живёт в браузере, трею
+// оно неизвестно — дёргаем оба автомата (решение 16.08).
 // ---------------------------------------------------------------------------
-const KKZ_URL = 'https://kkz-button.207.174.31.143.sslip.io:8445';
-const KKZ_PIN = '3033';
+const kkzClientPromise = import('./kkz-client.mjs');
 
 async function kkzSetPower(on) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 4000);
-  try {
-    const res = await fetch(`${KKZ_URL}/api/batch`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Pin': KKZ_PIN },
-      body: JSON.stringify({ devices: [0, 1], on, source: 'tray' }),
-      signal: ctrl.signal,
-    });
-    if (!res.ok) throw new Error(`KKZ HTTP ${res.status}`);
-    return res.json();
-  } finally {
-    clearTimeout(timer);
-  }
+  const kkz = await kkzClientPromise;
+  await kkz.kkzFetch(kkz.KKZ_URL, '/api/batch', {
+    method: 'POST',
+    body: { devices: [0, 1], on, source: 'tray' },
+  });
 }
 
 async function kkzGetStatus() {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 4000);
-  try {
-    const res = await fetch(`${KKZ_URL}/api/status`, { headers: { 'X-Pin': KKZ_PIN }, signal: ctrl.signal });
-    if (!res.ok) throw new Error(`KKZ HTTP ${res.status}`);
-    const list = await res.json();
-    // Свет «включён», если включён хотя бы один автомат
-    return Array.isArray(list) && list.some((d) => d.on);
-  } finally {
-    clearTimeout(timer);
-  }
+  const kkz = await kkzClientPromise;
+  const list = await kkz.kkzFetch(kkz.KKZ_URL, '/api/status');
+  // Свет «включён», если включён хотя бы один автомат
+  return Array.isArray(list) && list.some((d) => d.on);
 }
 
 // ---------------------------------------------------------------------------

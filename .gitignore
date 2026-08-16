@@ -14,9 +14,13 @@ tools/wing/venv/
 # --- runtime data (библиотека медиа, не код) ---
 media/
 music 2 midi/web_ui_data/
+web_ui_data/
 
 # --- локальные данные/проекты/логи/замеры ---
 logs/
+projects/
+*.zip
+kkz-button-src/
 projects/
 routing_store.json
 scenes_store.json

@@ -1,5 +1,14 @@
 # Реактивный свет: MIDI (MuScriptor) + MP3 → приборы DMX
 
+> **ПОМЕТКА 16.08 (расхождение с кодом):** документ частично устарел.
+> Этап 3 реализован: движок перенесён в ноду Lumina **midi-track**
+> (`web/nodes/MidiTrackNode.tsx`, `web/utils/lightEngine.ts`) — см.
+> `docs/NODES.md` и `docs/track-director-architecture.md`. Ноды
+> **StemNode / PannerNode и `stemAudioManager.ts` удалены 27.07** — в тексте
+> ниже они упоминаются как существующие (это история). Role-шин
+> kick/snare/hats/bass/harmony/lead/all в текущем коде НЕТ — у midi-track
+> только выходы `out-0..out-3`.
+
 Статус: **MVP ГОТОВ И ПРОВЕРЕН НА ЖЕЛЕЗЕ (24.07.2026, ночь).**
 Анализ уровней + вкладка «Свет» + DMX-стрим на 4 расчёски прямо из
 вкладки — работает, юзер подтвердил («шикарная картинка»).
