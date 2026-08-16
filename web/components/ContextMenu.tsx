@@ -114,6 +114,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({ menu, nodes, onClose, onAddNo
                     <div className="context-menu-item" onClick={() => onAddNode('midi-track', screenToFlowPosition({ x: menu.x, y: menu.y }))}>+ MIDI-трек (реактивный свет)</div>
                     <div className="context-menu-item" onClick={() => onAddNode('music-track', screenToFlowPosition({ x: menu.x, y: menu.y }))}>+ Трек (MP3 → автоанализ)</div>
                     <div className="context-menu-item" onClick={() => onAddNode('palette', screenToFlowPosition({ x: menu.x, y: menu.y }))}>+ Палитра COB (цвет верхнего света)</div>
+                    <div className="context-menu-item" onClick={() => onAddNode('kkz', screenToFlowPosition({ x: menu.x, y: menu.y }))}>+ Пульт KKZ (Tuya-автоматы)</div>
                     
                     <div 
                         className="context-menu-item flex justify-between items-center relative"
