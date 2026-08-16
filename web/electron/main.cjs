@@ -67,6 +67,24 @@ function saveSetting(key, value) {
 }
 
 // ---------------------------------------------------------------------------
+// KKZ: главный переключатель автоматов из трея (оба устройства).
+// URL/PIN совпадают с дефолтами ноды KkzNode.tsx; armed-состояние живёт в
+// браузере, трею оно неизвестно — дёргаем оба автомата (решение 16.08).
+// ---------------------------------------------------------------------------
+const KKZ_URL = 'https://kkz-button.207.174.31.143.sslip.io:8445';
+const KKZ_PIN = '3033';
+
+async function kkzSetPower(on) {
+  const res = await fetch(`${KKZ_URL}/api/batch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Pin': KKZ_PIN },
+    body: JSON.stringify({ devices: [0, 1], on, source: 'tray' }),
+  });
+  if (!res.ok) throw new Error(`KKZ HTTP ${res.status}`);
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
 // Backend health check: HTTP GET with a short timeout
 // ---------------------------------------------------------------------------
 function pingBackend() {
@@ -88,6 +106,21 @@ function startBackendTask() {
     child.on('error', (e) => resolve({ ok: false, error: String(e) }));
     child.on('close', (code) => resolve(code === 0 ? { ok: true } : { ok: false, error: err || `exit code ${code}` }));
   });
+}
+
+function endBackendTask() {
+  return new Promise((resolve) => {
+    const child = spawn('schtasks', ['/end', '/tn', TASK_NAME], { windowsHide: true });
+    let err = '';
+    child.stderr.on('data', (d) => { err += d.toString(); });
+    child.on('error', (e) => resolve({ ok: false, error: String(e) }));
+    child.on('close', (code) => resolve(code === 0 ? { ok: true } : { ok: false, error: err || `exit code ${code}` }));
+  });
+}
+
+function restartBackendTask() {
+  return endBackendTask().then(() => new Promise((resolve) => setTimeout(resolve, 500)))
+    .then(() => startBackendTask());
 }
 
 // ---------------------------------------------------------------------------
@@ -131,12 +164,19 @@ function createTray() {
   tray.setToolTip('Lumina Control Center');
 
   const contextMenu = () => Menu.buildFromTemplate([
-    { label: 'Показать / скрыть', click: toggleWindow },
+    {
+      label: 'KKZ свет ВКЛ',
+      click: () => { kkzSetPower(true).catch(() => {}); },
+    },
+    {
+      label: 'KKZ свет ВЫКЛ',
+      click: () => { kkzSetPower(false).catch(() => {}); },
+    },
     { type: 'separator' },
     {
-      label: 'Запустить сервер',
+      label: 'Рестарт сервера',
       click: async () => {
-        await startBackendTask();
+        await restartBackendTask();
         if (mainWindow && !(await pingBackend())) {
           mainWindow.loadFile(path.join(__dirname, 'splash.html'));
         }
