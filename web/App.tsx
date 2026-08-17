@@ -29,6 +29,7 @@ import { MidiTrackNode } from './nodes/MidiTrackNode';
 import { MusicTrackNode } from './nodes/MusicTrackNode';
 import { PaletteNode } from './nodes/PaletteNode';
 import { KkzNode } from './nodes/KkzNode';
+import { PatchNode } from './nodes/PatchNode';
 import { KKZ_URL, KKZ_PIN } from './electron/kkz-client.mjs';
 import ButtonEdge from './components/ButtonEdge';
 import Header from './components/Header';
@@ -69,7 +70,8 @@ const nodeTypes = {
   'midi-track': memo(MidiTrackNode),
   'music-track': memo(MusicTrackNode),
   palette: memo(PaletteNode),
-  kkz: memo(KkzNode)
+  kkz: memo(KkzNode),
+  patch: memo(PatchNode)
 };
 
 const edgeTypes = {
@@ -498,7 +500,9 @@ const FlowWrapper: React.FC = () => {
         type: node.data?.type || node.type || 'unknown',
         onChange: handleNodeValueChange,
         onParamChange: handleNodeParamChange,
-        onAudioLevelsUpdate: handleAudioLevelsUpdate
+        onAudioLevelsUpdate: handleAudioLevelsUpdate,
+        onAddNode: addNode,
+        onDeleteNode: deleteNode
       }
     };
   }, [handleAudioLevelsUpdate, handleNodeValueChange, handleNodeParamChange]);
@@ -954,6 +958,7 @@ const FlowWrapper: React.FC = () => {
     if (type === 'music-track' && !initialData) defaultParams = { audioUrl: null, audioName: null, analysisUrl: null, analysisName: null, notes: 0, duration: 0 };
     if (type === 'palette' && !initialData) defaultParams = { hue: 0, saturation: 1 };
     if (type === 'kkz' && !initialData) defaultParams = { url: KKZ_URL, pin: KKZ_PIN, armed: [true, true], master: false };
+    if (type === 'patch' && !initialData) defaultParams = { expanded: false, stacks: [], groups: [] };
     const newNode: LuminaNode = injectHandlers({ id, type, position: pos || { x: 100, y: 100 }, data: { label: initialData?.label || type.toUpperCase(), type, params: defaultParams } } as LuminaNode);
     setNodes(nds => [...nds, newNode]);
     setMenu(null);

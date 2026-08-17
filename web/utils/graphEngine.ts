@@ -2,6 +2,7 @@
 import { LuminaNode, LuminaEdge, MixingStrategy, DmxValue, MidiState } from '../types';
 import { FIXTURE_LAYOUTS, DMX_BLACK_FLOOR, DIMMABLE_CHANNEL_TYPES } from '../constants';
 import { midiTrackManager } from '../services/midiTrackManager';
+import { DEFAULT_END_PATTERN } from './midiTrackConfig';
 import { DEFAULT_LIGHT_PARAMS, LightEngineParams } from './lightEngine';
 import { backstageOrderKey, notesFrames } from './backstageWash';
 import { applyTiltGuard, clampTilt, getTiltLimits, tiltChannelOffset } from './tiltGuard';
@@ -720,6 +721,27 @@ export const evaluateGraph = (
         const group = safeGroup(params.group);
         const isActive = activeGroups.has(group) && !params.stop;
 
+        // Триггер «конец трека» (выход out-4): проигрывает endPattern
+        // (0-255 по шагам v/ms) в последние endSeconds секунд, после окна — 0.
+        // KKZ-пульт: провод на master-in = мигание (по фронтам 0↔255),
+        // на off-in = одно выключение. 16.08: свет зала мигает последние 3 сек.
+        const endSec = Math.max(0, params.endSeconds ?? 3);
+        const endPattern = Array.isArray(params.endPattern) && params.endPattern.length
+          ? params.endPattern
+          : DEFAULT_END_PATTERN;
+        const mtTime = midiTrackManager.getTime(node.id);
+        const mtDur = midiTrackManager.getDuration(node.id);
+        let endTrigger = 0;
+        if (mtDur > 0 && mtTime >= mtDur - endSec && mtTime < mtDur) {
+          const elapsed = mtTime - (mtDur - endSec);
+          let cum = 0;
+          for (const step of endPattern) {
+            if (elapsed < cum + step.ms) { endTrigger = step.v; break; }
+            cum += step.ms;
+          }
+          endTrigger = Math.max(0, Math.min(255, Math.round(endTrigger)));
+        }
+
         const inVal = (handle: string): number | null => {
           const vals = getInputsForHandle(node.id, handle, incomingEdgesByTarget, nodeValues, nodeMap);
           if (vals.length === 0) return null;
@@ -881,7 +903,7 @@ export const evaluateGraph = (
           // comb 137..175, midi-track 35..204 → мотор уезжал в 204).
           // Гашение освободившихся каналов — ownedChannelsRef в App.tsx,
           // удержание мотора — applyTiltGuard.
-          outputs = [0, mtl.park, 0, 0];
+          outputs = [0, mtl.park, 0, 0, 0];
           break;
         }
 
@@ -934,7 +956,7 @@ export const evaluateGraph = (
           // начнётся с парковки и плавного ввода света, а не со вспышки
           // из положения, где мотор стоял до стопа (28.07).
           params._activeSince = 0;
-          outputs = [0, 128, 0, 0];
+          outputs = [0, 128, 0, 0, 0];
           break;
         }
 
@@ -1115,7 +1137,9 @@ export const evaluateGraph = (
         outputs = [Math.max(0, Math.min(255, Math.round(frame.energy * 40))), motor,
           Math.max(0, Math.min(255, Math.round(washMaster * 255))),
           // out-3 «ЛУЧИ»: по проводу — та же энергия кадра, что и out-0.
-          Math.max(0, Math.min(255, Math.round(frame.energy * 40)))];
+          Math.max(0, Math.min(255, Math.round(frame.energy * 40))),
+          // out-4 «Конец трека»: триггер для KKZ-пульта (0→255 за endSeconds).
+          endTrigger];
         break;
       }
 
@@ -1154,11 +1178,12 @@ export const evaluateGraph = (
         // Входы пульта KKZ (управление с других нод — звук, таймер, LFO):
         // значение — максимум по рёбрам на входе, -1 если вход не подключён.
         // Нода сама детектит фронты 0↔1 и шлёт HTTP только при переходе.
+        // off-in (4-й) — триггер «выключить все автоматы» по фронту 0→255.
         const readIn = (handle: string): number => {
           const vals = getInputsForHandle(node.id, handle, incomingEdgesByTarget, nodeValues, nodeMap);
           return vals.length ? Math.max(...vals) : -1;
         };
-        outputs = [readIn('master-in'), readIn('dev-0-in'), readIn('dev-1-in')];
+        outputs = [readIn('master-in'), readIn('dev-0-in'), readIn('dev-1-in'), readIn('off-in')];
         break;
       }
     }
@@ -1205,6 +1230,14 @@ export const evaluateGraph = (
       }
   });
 
+  // Стаки (патч-нода): намеренные параллельные приборы на одних адресах
+  // (спаренные COB на 200 и т.п.) — для приборов из одного стака перекрытие
+  // каналов НЕ считается конфликтом.
+  const stackPatch = nodes.find(n => n.type === 'patch');
+  const stacks: string[][] = Array.isArray(stackPatch?.data?.params?.stacks)
+      ? stackPatch.data.params.stacks
+      : [];
+
   fixtures.forEach(node => {
       const start = node.data.params?.startChannel || 1;
       const fType = node.data.params?.fixtureType || 'dimmer';
@@ -1216,8 +1249,15 @@ export const evaluateGraph = (
       if (isActive) {
           for (let i = 0; i < layout.length; i++) {
               if (channelClaims[start + i] && channelClaims[start + i].length > 1) {
-                  hasConflict = true;
-                  break;
+                  const claimers = channelClaims[start + i];
+                  const others = claimers.filter(c => c !== node.id);
+                  // Все конфликтующие приборы в одном и том же стаке — намеренный параллель
+                  const stackedTogether = others.length > 0 &&
+                      stacks.some(s => s.includes(node.id) && others.every(o => s.includes(o)));
+                  if (!stackedTogether) {
+                      hasConflict = true;
+                      break;
+                  }
               }
           }
       }
