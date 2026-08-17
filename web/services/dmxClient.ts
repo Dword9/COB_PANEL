@@ -1,5 +1,6 @@
 
 import { ConnectionStatus, DmxValue } from '../types';
+import { debugLog } from '../utils/debugLog';
 
 export class DmxClient {
   private ws: WebSocket | null = null;
@@ -28,6 +29,7 @@ export class DmxClient {
 
       this.ws.onopen = () => {
         console.log(`[DMX] Connected to ${this.url}`);
+        debugLog.log('ws', `open ${this.url}`);
         if (this.isManualClose) {
           this.ws?.close();
           return;
@@ -41,6 +43,7 @@ export class DmxClient {
 
       this.ws.onclose = (event) => {
         console.warn(`[DMX] Connection closed: ${event.code} ${event.reason}. Reconnecting in 3s...`);
+        debugLog.warn('ws', `close code=${event.code} reason="${event.reason}" manual=${this.isManualClose}`);
         if (this.isManualClose) {
           this.onStatusChange(ConnectionStatus.DISCONNECTED);
           return;
@@ -51,6 +54,7 @@ export class DmxClient {
 
       this.ws.onerror = (error) => {
         console.error(`[DMX] WebSocket Error:`, error);
+        debugLog.error('ws', 'error', error);
         this.ws?.close();
       };
 
@@ -71,11 +75,47 @@ export class DmxClient {
 
   // Последние значения по каналам, не ушедшие из-за троттлинга/обрыва — сливаются при первом возможном окне
   private pending: Map<number, number> = new Map();
+  private lastDeadLog = 0;
+  // Юниверс 2 (17.08): свой pending/троттл, кадр уходит в {"u":2,...}
+  private pending2: Map<number, number> = new Map();
+  private lastSendTime2: number = 0;
+
+  public sendU2(updates: DmxValue[], force = false) {
+    if (!this.ws || this.ws.readyState !== 1) {
+      for (const u of updates) this.pending2.set(u.ch, u.val);
+      return false;
+    }
+    const now = Date.now();
+    if (!force && now - this.lastSendTime2 < this.throttleMs) {
+      for (const u of updates) this.pending2.set(u.ch, u.val);
+      return false;
+    }
+    if (this.pending2.size > 0) {
+      for (const u of updates) this.pending2.set(u.ch, u.val);
+      updates = Array.from(this.pending2, ([ch, val]) => ({ ch, val }));
+      this.pending2.clear();
+    }
+    if (updates.length > 0 || force) {
+      if (updates.length === 1) {
+        this.ws.send(JSON.stringify({ u: 2, ch: updates[0].ch, val: updates[0].val }));
+      } else {
+        this.ws.send(JSON.stringify({ u: 2, values: updates.map(u => [u.ch, u.val]) }));
+      }
+      this.lastSendTime2 = now;
+      return true;
+    }
+    return false;
+  }
 
   public send(updates: DmxValue[], force = false) {
     if (!this.ws || this.ws.readyState !== 1) {
       // Сокет мёртв: копим последние значения, чтобы дослать после реконнекта
       for (const u of updates) this.pending.set(u.ch, u.val);
+      const now = Date.now();
+      if (now - this.lastDeadLog > 10000) {
+        this.lastDeadLog = now;
+        debugLog.warn('dmx', `send-to-dead-socket, pending=${this.pending.size}`);
+      }
       return false;
     }
     const now = Date.now();

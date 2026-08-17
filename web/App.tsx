@@ -48,6 +48,7 @@ import { computeAutoLayout } from './utils/autoLayout';
 import { arraysEqual, getColorFromName } from './utils/helpers';
 import { useKeyboard } from './hooks/useKeyboard';
 import { renderRegistry } from './utils/renderRegistry';
+import { debugLog } from './utils/debugLog';
 
 import { inputAudioManager } from './services/inputAudioManager';
 
@@ -220,6 +221,10 @@ const FlowWrapper: React.FC = () => {
   const graphCache = useRef<any>({ sortedIds: [], structureHash: '' });
   const pendingUpdates = useRef<{ nodeValues: Record<string, number[]>, nodeUpdates: Record<string, any> } | null>(null);
   const lastDmxState = useRef<Record<number, number>>({});
+  // Юниверс 2 (17.08): отдельный кадр на OUT 2 — свои состояние/гашение/нули
+  const lastDmxState2 = useRef<Record<number, number>>({});
+  const zeroRepeats2 = useRef<Map<number, number>>(new Map());
+  const ownedChannels2Ref = useRef<Set<number>>(new Set());
   // Каналы, которым нужно повторить нулевой кадр (гарантия гашения)
   const zeroRepeats = useRef<Map<number, number>>(new Map());
   const lastUiUpdate = useRef<number>(0);
@@ -314,8 +319,11 @@ const FlowWrapper: React.FC = () => {
         // которые есть в старом проекте, но отсутствуют в новом, останутся
         // висеть с последними значениями (приборы держат DMX вечно).
         dmxClient.current?.send(Array.from({ length: 512 }, (_, i) => ({ ch: i + 1, val: 0 })), true);
+        dmxClient.current?.sendU2(Array.from({ length: 512 }, (_, i) => ({ ch: i + 1, val: 0 })), true);
         lastDmxState.current = {};
         ownedChannelsRef.current.clear();
+        lastDmxState2.current = {};
+        ownedChannels2Ref.current.clear();
 
         setNodes([]);
         setEdges([]);
@@ -456,6 +464,10 @@ const FlowWrapper: React.FC = () => {
         }
 
         if (n.id === nodeId) {
+            const oldVal = n.data.params?.[key];
+            if (oldVal !== val && key !== 'currentValues' && key !== 'manualValues') {
+                debugLog.log('param', `${n.type} ${nodeId} .${key}: ${typeof oldVal === 'object' ? JSON.stringify(oldVal) : oldVal} -> ${typeof val === 'object' ? JSON.stringify(val) : val}`);
+            }
             if (key === 'label') return { ...n, data: { ...n.data, [key]: val } };
             
             let updatedParams = { ...n.data.params, [key]: val };
@@ -724,7 +736,7 @@ const FlowWrapper: React.FC = () => {
   // -- MAIN ENGINE LOOPS --
   const runLogic = useCallback(() => {
     midiStateRef.current = midiManager.getState();
-    const { nodeValues, dmxUpdates, nodeUpdates } = evaluateGraph(
+    const { nodeValues, dmxUpdates, dmxUpdates2, nodeUpdates } = evaluateGraph(
         nodesRef.current, edgesRef.current, inputLevels.current, midiStateRef.current, graphCache
     );
     // Дешёвый числовой хеш вместо JSON.stringify всего графа 62 раза в секунду
@@ -816,6 +828,48 @@ const FlowWrapper: React.FC = () => {
         (window as any).forceFullFrame = false;
     } else if (deltaUpdates.length > 0) {
         if (dmxClient.current?.send(deltaUpdates, false)) lastTxTime.current = now;
+    }
+
+    // --- Юниверс 2 (17.08): отдельный кадр OUT 2 (своя карта патчинга) ---
+    const targetUpdates2: DmxValue[] = isBlackoutRef.current
+      ? dmxUpdates2.map(u => ({ ...u, val: safeVal(u.ch, 0) }))
+      : dmxUpdates2;
+    const currentOwned2 = new Set<number>(targetUpdates2.map(u => u.ch));
+    const zeroOut2: DmxValue[] = [];
+    if (!isBlackoutRef.current) {
+        ownedChannels2Ref.current.forEach(ch => {
+            if (!currentOwned2.has(ch)) {
+                zeroOut2.push({ ch, val: safeVal(ch, 0) });
+                delete lastDmxState2.current[ch];
+            }
+        });
+    }
+    ownedChannels2Ref.current = currentOwned2;
+    const frame2: DmxValue[] = isBlackoutRef.current
+      ? Array.from({ length: 512 }, (_, i) => ({ ch: i + 1, val: safeVal(i + 1, 0) }))
+      : [...targetUpdates2, ...zeroOut2];
+    const deltaUpdates2: DmxValue[] = [];
+    for (const u of frame2) {
+        const changed = lastDmxState2.current[u.ch] !== u.val;
+        if (changed) {
+            lastDmxState2.current[u.ch] = u.val;
+            deltaUpdates2.push(u);
+            if (u.val === 0 && changed) zeroRepeats2.current.set(u.ch, DMX_ZERO_REPEATS);
+            else if (u.val !== 0) zeroRepeats2.current.delete(u.ch);
+        } else if (u.val === 0) {
+            const left = zeroRepeats2.current.get(u.ch);
+            if (left) {
+                deltaUpdates2.push(u);
+                if (left <= 1) zeroRepeats2.current.delete(u.ch);
+                else zeroRepeats2.current.set(u.ch, left - 1);
+            }
+        }
+    }
+    if (isHeartbeat) {
+        const fullFrame2: DmxValue[] = Object.entries(lastDmxState2.current).map(([ch, val]) => ({ ch: parseInt(ch), val: val as number }));
+        dmxClient.current?.sendU2(fullFrame2, true);
+    } else if (deltaUpdates2.length > 0) {
+        dmxClient.current?.sendU2(deltaUpdates2, false);
     }
 
     // --- Шина реактивной проекции (28.07, слой projectors.visual) --------
@@ -941,8 +995,8 @@ const FlowWrapper: React.FC = () => {
 
   const onEdgeClick = useCallback((event: React.MouseEvent, edge: any) => { if (isAltPressed) setEdges((eds) => eds.filter((e) => e.id !== edge.id)); }, [isAltPressed]);
 
-  const addNode = (type: string, pos?: { x: number, y: number }, initialData?: any) => {
-    const id = `${type}-${Date.now()}`;
+  const addNode = (type: string, pos?: { x: number, y: number }, initialData?: any, forcedId?: string) => {
+    const id = forcedId || `${type}-${Date.now()}`;
     let defaultParams: any = initialData?.params || {};
     if (type === 'math' && !initialData) defaultParams = { scale: 1, offset: 0 };
     if (type === 'audio' && !initialData) defaultParams = { gain: 1, gate: 0, decay: 0 };
@@ -960,6 +1014,7 @@ const FlowWrapper: React.FC = () => {
     if (type === 'kkz' && !initialData) defaultParams = { url: KKZ_URL, pin: KKZ_PIN, armed: [true, true], master: false };
     if (type === 'patch' && !initialData) defaultParams = { expanded: false, stacks: [], groups: [] };
     const newNode: LuminaNode = injectHandlers({ id, type, position: pos || { x: 100, y: 100 }, data: { label: initialData?.label || type.toUpperCase(), type, params: defaultParams } } as LuminaNode);
+    debugLog.log('app', `add-node ${type} ${id} label="${initialData?.label || type.toUpperCase()}"`);
     setNodes(nds => [...nds, newNode]);
     setMenu(null);
   };
@@ -1182,6 +1237,7 @@ const FlowWrapper: React.FC = () => {
 
   const deleteNode = (id: string) => {
     const nodeToDelete = nodes.find(n => n.id === id);
+    if (nodeToDelete) debugLog.log('app', `delete-node ${nodeToDelete.type} ${id} label="${nodeToDelete.data.label}"`);
     if (nodeToDelete) onNodesDelete([nodeToDelete]);
     setNodes(nds => nds.filter(n => n.id !== id));
     setEdges(eds => eds.filter(e => e.source !== id && e.target !== id));

@@ -305,15 +305,33 @@ bypass отсекаются. При смене роутинга вклад LOCAL
   Триггер по времени (не `isPlaying`) — пауза/стоп не дают ложных фронтов.
 - **Патч-нода (17.08):** визуальный DMX-патч в веб-графе
   (`web/nodes/PatchNode.tsx`, тип `patch`). Модель «A» — диспетчер: правит
-  существующие fixture-ноды через `onParamChange(fid, startChannel/group)` +
-  `onAddNode`/`onDeleteNode` (добавлены в `injectHandlers`). Полотно —
-  пианоролл по адресам 1..512, два юниверса (U2 = зеркало U1, read-only),
+  существующие fixture-ноды через `onParamChange(fid, startChannel/group/universe)` +
+  `onAddNode`/`onDeleteNode` (добавлены в `injectHandlers`). Модель правки
+  **«черновик + Применить»**: правки копятся в локальном черновике (не трогая
+  граф), «Применить…» = модал с именем (дефолт «предыдущее имя + номер +1»),
+  коммит разом + сохранение пресета; undo-стек (кнопка ↶, до 60 снапшотов),
+  «Сбросить» = черновик к графу. Полотно — пианоролл по адресам 1..512, **два
+  редактируемых юниверса** (U1 адреса 1..191, U2 отдельная линия OUT2 200..449;
+  сервер шлёт `send_dmx(frame, frame2)`, см. ниже), поле `universe` у прибора,
   драг полосы = смена адреса, маркеры групп (красные, номер = ALT+N, дубли
   номеров → предупреждение), «⧉ Стак» = намеренный параллель (движок не
   считает конфликтом приборы одного стака — `graphEngine`, `params.stacks`),
   банк = глобальная библиотека профилей (localStorage `lumina-fixture-bank`,
-  `web/utils/fixtureBank.ts`). Сервер/консоль/депо/COB-панель НЕ трогает.
+  `web/utils/fixtureBank.ts`, дефолтные прячутся через `lumina-bank-hidden`).
+  **Патчи-пресеты (stage)** — `web/utils/patchPresets.ts`: сохранённые в
+  `lumina-stage-patches` + дефолтные ★ Blank (пустой) и ★ Stage (полная карта
+  из `INITIAL_FIXTURES`; юниверс: адрес <200 → U1 иначе U2; дефолтные прячутся
+  через `lumina-stage-hidden`). Сервер/консоль/депо/COB-панель НЕ трогает.
   Справочник — `docs/NODES.md` §15.
+- **Отладочный лог действий фронта (17.08):** `web/utils/debugLog.ts` —
+  кольцевой буфер (4000) + `window.__debugLog.dump()/dumpJSON()/clear()/count()`
+  (webshot `--js "window.__debugLog.dumpJSON()"`), батч-POST `/debug-log`
+  раз в 1.5с + sendBeacon на pagehide. Сервер пишет в `logs/debug_web.log`
+  (UTF-8). Инструментированы: PatchNode (toggle/drag-address/select/
+  set-address/set-groups/make-stack/unstack/delete/add-group/save-to-bank/
+  create-from-bank/preset-load/apply), App (param-change/add-node/delete-node),
+  graphEngine (конфликты), dmxClient (WS open/close/error/send-to-dead-socket).
+  `.gitignore` += `logs/`.
 
 ## Грабли — не наступать повторно
 
@@ -699,10 +717,13 @@ E2E проверено в headless: удалил comb1-4 → красное → 
 основная 1–191, wireless 200–449 не пересекаются).
 
 **Софт:**
-- `server_v4.py`: `send_dmx(frame, frame)` — в U2 шлём ЗЕРКАЛО U1 (было
-  нули). Обе линии читают «свои» адреса, чужие игнорируют. Отдельной
-  адресации U2 НЕТ и не нужна. Протокол крыла u2 умеет (реверс), OUT 2
-  физически проверялся юзером в тот же день.
+- `server_v4.py`: **раздельный U2 (17.08)** — `send_dmx(frame, frame2)`:
+  второй буфер `dmx_data_2`/`_sources_2`/`_last_sent_2`, каждая линия читает
+  «свои» адреса, чужие игнорируют (было зеркало `send_dmx(frame, frame)`).
+  WS-протокол для U2: батч `{"u":2,"values":[[ch,val],...]}` (источник в
+  `_list_sources`) и single `{"u":2,"ch":N,"val":V}` → `LOCAL_SOURCE` u2;
+  `/api/debug/dmx` отдаёт `u2_*` поля. Протокол крыла u2 умеет (реверс),
+  OUT 2 физически проверялся юзером в тот же день.
 - **`isRgbWashFixture()`** (graphEngine): любой прибор с R/G/B в раскладке
   без моторных каналов (pan/tilt): led_par 6ch, mini_par 7ch, led_par_8ch,
   кастомы-RGB. Comb и spider НЕ заливка. Запись по ТИПАМ каналов (у 6ch

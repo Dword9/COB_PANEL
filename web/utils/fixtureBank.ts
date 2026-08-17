@@ -8,6 +8,18 @@ export interface FixtureProfile {
 }
 
 const BANK_KEY = 'lumina-fixture-bank';
+const HIDDEN_KEY = 'lumina-bank-hidden';
+
+function loadHidden(): Set<string> {
+  try {
+    const raw = localStorage.getItem(HIDDEN_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr.filter((x: any) => typeof x === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
 
 const BUILTIN_NAMES: Record<string, string> = {
   dimmer: 'Dimmer / PAR (1ch)',
@@ -30,7 +42,8 @@ const builtinProfiles = (): FixtureProfile[] =>
 const isBuiltin = (id: string) => Object.prototype.hasOwnProperty.call(FIXTURE_LAYOUTS, id);
 
 export function loadFixtureBank(): FixtureProfile[] {
-  const builtin = builtinProfiles();
+  const hidden = loadHidden();
+  const builtin = builtinProfiles().filter(p => !hidden.has(p.id));
   try {
     const raw = localStorage.getItem(BANK_KEY);
     if (!raw) return builtin;
@@ -65,6 +78,17 @@ export function saveFixtureProfile(profile: FixtureProfile) {
 }
 
 export function removeFixtureProfile(id: string) {
-  if (isBuiltin(id)) return;
+  if (isBuiltin(id)) {
+    // Дефолтный профиль нельзя удалить физически (он в FIXTURE_LAYOUTS),
+    // поэтому прячем его через скрытый список (17.08).
+    const h = loadHidden();
+    h.add(id);
+    localStorage.setItem(HIDDEN_KEY, JSON.stringify([...h]));
+    return;
+  }
   localStorage.setItem(BANK_KEY, JSON.stringify(loadCustom().filter(p => p.id !== id)));
+}
+
+export function isBuiltinProfile(id: string): boolean {
+  return isBuiltin(id);
 }
