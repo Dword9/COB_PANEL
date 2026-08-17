@@ -151,12 +151,18 @@ class ConsoleEngine:
                     if 0 <= ch < self.dmx_len:
                         self.channel_roles[ch] = role
 
+    def _slot_channels(self, num) -> list:
+        """Последовательные глобальные каналы слота (прибор за прибором)."""
+        out = []
+        for ftype, base in self._devices.get(str(num), []):
+            out.extend(base + i for i in range(CHANNELS_BY_TYPE[ftype]))
+        return out
+
     def max_channels(self, nums) -> int:
         """Максимум каналов среди выбранных слотов (для страниц ALT)."""
         mx = 0
         for num in nums:
-            for ftype, _ in self._devices.get(str(num), []):
-                mx = max(mx, CHANNELS_BY_TYPE[ftype])
+            mx = max(mx, len(self._slot_channels(num)))
         return mx or 8
 
     def _page_clamp(self):
@@ -339,20 +345,19 @@ class ConsoleEngine:
             self.flash_held.discard(n)
 
     def _chanfader(self, fader: int, value: int):
-        """ALT: фейдер = канал (page-1)*8 + (fader-1) каждого выбранного слота."""
+        """ALT: фейдер = канал (page-1)*8 + (fader-1) слота по порядку приборов."""
         value = max(0, min(255, int(value)))
         idx = (self.alt_page - 1) * 8 + (fader - 1)
         written = False
         for num in sorted(self.selected):
-            for ftype, base in self._devices.get(num, []):
-                if idx < CHANNELS_BY_TYPE[ftype]:
-                    ch = base + idx
-                    if 1 <= ch <= self.dmx_len:
-                        self.programmer[ch] = value
-                        written = True
+            channels = self._slot_channels(num)
+            if idx < len(channels):
+                ch = channels[idx]
+                if 1 <= ch <= self.dmx_len:
+                    self.programmer[ch] = value
+                    written = True
         if not written:
-            # Нет выбранного слота / канала — фейдер всё равно сохраняет «мёртвую»
-            # позицию в программере? Нет — без слота канал писать некуда.
+            # Нет выбранного слота / канала — фейдер «мёртвый», ничего не пишет.
             pass
 
     def on_fader(self, fader: int, value: int):
@@ -489,18 +494,13 @@ class ConsoleEngine:
         with self._lock:
             if self.mode == "alt":
                 out = []
+                channels = []
+                if self.selected:
+                    channels = self._slot_channels(sorted(self.selected)[0])
                 for f in range(1, 9):
-                    ch = (self.alt_page - 1) * 8 + (f - 1) + 1
-                    # канал первого выбранного слота
-                    base = None
-                    ftype = None
-                    if self.selected:
-                        num = sorted(self.selected)[0]
-                        devs = self._devices.get(num, [])
-                        if devs:
-                            ftype, base = devs[0]
-                    if base is not None and ftype is not None and ch <= CHANNELS_BY_TYPE[ftype]:
-                        out.append(self.programmer.get(base + (ch - 1), 0))
+                    idx = (self.alt_page - 1) * 8 + (f - 1)
+                    if idx < len(channels):
+                        out.append(self.programmer.get(channels[idx], 0))
                     else:
                         out.append(0)
                 return out
