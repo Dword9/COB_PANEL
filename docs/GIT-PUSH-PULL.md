@@ -6,7 +6,7 @@
 
 | remote | URL | ветка для пуша | куда |
 |--------|-----|----------------|------|
-| `origin` | https://github.com/Dword9/lumina-dmx | `fixture-profiles-patch` (рабочая) | GitHub, главный |
+| `origin` | https://github.com/Dword9/lumina-dmx | `DWORD` (основная рабочая по умолчанию) | GitHub, главный |
 | `github` | https://github.com/Dword9/COB_PANEL | `master` | GitHub, зеркало COB-панели |
 | `gitflic` | https://gitflic.ru/project/fedototovaleksandr/cob-panel | `master` | GitFlic, зеркало COB-панели |
 
@@ -33,8 +33,8 @@ git status --short | Select-String "github_pat|xxx0"
 git add -A
 git commit -m "15.08: <краткое содержание>"
 
-# 4. главный ремоут
-git push origin HEAD:fixture-profiles-patch
+# 4. главный ремоут (по умолчанию пушим в ветку DWORD, если юзер не укажет иное)
+git push origin HEAD:DWORD
 
 # 5-6. зеркала COB-панели (ТОЛЬКО если правилась панель/сервер COB: COB_5_v3.0.html, server_v4.py и т.п.)
 git push github HEAD:master
@@ -44,7 +44,7 @@ git push gitflic HEAD:master
 git status --short
 
 # 8. контроль: все три ремоута на одном коммите
-git ls-remote origin fixture-profiles-patch
+git ls-remote origin DWORD
 git ls-remote github master
 git ls-remote gitflic master
 ```
@@ -60,7 +60,7 @@ git ls-remote gitflic master
 ## 5. Пулл / обновление
 
 ```powershell
-git pull origin fixture-profiles-patch
+git pull origin DWORD
 ```
 
 Зеркала (github/gitflic) не пулить обратно — это выгрузка, не источник.
@@ -77,7 +77,7 @@ $tok = "<...>"
 "protocol=https`nhost=gitflic.ru`nusername=oauth2`npassword=$tok`n" | git credential approve
 ```
 
-Проверка: `git push origin HEAD:fixture-profiles-patch` → «Everything up-to-date» (значит аутентификация ок).
+Проверка: `git push origin HEAD:DWORD` → «Everything up-to-date» (значит аутентификация ок).
 
 ## 7. ГРАБЛИ (запомнить — 15.08)
 
