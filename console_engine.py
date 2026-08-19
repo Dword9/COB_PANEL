@@ -42,7 +42,7 @@ ROLE_NONE = "none"
 ROLES_BY_TYPE = {
     "dimmer": {0: ROLE_DIMMER},
     "led_par": {0: ROLE_RGB, 1: ROLE_RGB, 2: ROLE_RGB, 4: ROLE_STROBE},
-    "led_par_8ch": {0: ROLE_DIMMER, 1: ROLE_RGB, 2: ROLE_RGB, 3: ROLE_RGB, 4: ROLE_RGB, 5: ROLE_STROBE},
+    "led_par_8ch": {0: ROLE_DIMMER, 5: ROLE_STROBE},
     "spider": {2: ROLE_DIMMER, 3: ROLE_STROBE},
     "mini_par": {0: ROLE_DIMMER, 5: ROLE_STROBE},
     "comb_rgbw": {i: ROLE_RGB for i in range(2, 42)},
