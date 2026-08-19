@@ -475,6 +475,17 @@ class ConsoleEngine:
                 self.store_armed = False
             elif action == "scene_rec":
                 self._record_scene(int(kw.get("n", 0)))
+            elif action == "scene_set":
+                n = int(kw.get("n", 0))
+                channels = kw.get("channels") or {}
+                snap = {str(int(c)): max(0, min(255, int(v))) for c, v in channels.items() if int(v) > 0}
+                self.scenes[n] = snap
+                self.store_armed = False
+                if self.on_scene_save is not None:
+                    try:
+                        self.on_scene_save(n, snap)
+                    except Exception:
+                        pass
             else:
                 return
             self._changed()

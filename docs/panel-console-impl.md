@@ -177,6 +177,8 @@ Client→server (`{type:'console', action, ...}`):
 - `action:'chanfader', fader:1..8, v` (только в ALT)
 - `action:'num', n:1..10, on:0/1` · `action:'flash', n:11..16, on:0/1`
 - `action:'store', on:0/1` · `action:'clear'` · `action:'scene_rec', n`
+- `action:'scene_set', n, channels:{ch:val}` — точная запись сцены извне
+  (программная установка содержимого, напр. цветовые сцены COB).
 - `{type:'blackout', set}` — без изменений.
 
 Физические кнопки крыла приходят в движок напрямую (не через WS), но панель их видит
