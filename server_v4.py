@@ -45,6 +45,15 @@ OUTPUT_MODE = "wing"
 WING_FPS = 30       # Частота DMX-фреймов в крыло
 DMX_CHANNELS = 512  # Размер DMX-вселенной
 
+# Четыре расчёски на авансцене физически развёрнуты дисплеями внутрь сцены.
+# Внутри программы координаты остаются зрительскими: B1 слева из зала,
+# MotorY 0 = в зал, 128 = вверх, 255 = внутрь сцены. Перед USB-выходом
+# разворачиваем только аппаратную раскладку этих четырёх приборов.
+COMB_START_CHANNELS = (250, 293, 336, 379)
+COMB_PIXEL_COUNT = 10
+COMB_PIXEL_WIDTH = 4
+COMB_PARK_TILT = 128
+
 DIST_PATH = os.path.join(os.path.dirname(__file__), "web", "dist")
 VISUAL_PATH = os.path.join(os.path.dirname(__file__), "web", "visual", "index.html")
 PROJECTS_PATH = os.path.join(os.path.dirname(__file__), "projects")
@@ -55,6 +64,25 @@ if not os.path.exists(PROJECTS_PATH):
     os.makedirs(PROJECTS_PATH)
 if not os.path.exists(STEMS_PATH):
     os.makedirs(STEMS_PATH)
+
+
+def map_comb_rig_orientation(frame: bytes) -> bytes:
+    """Перевести логический DMX-кадр в текущую ориентацию четырёх расчёсок."""
+    mapped = bytearray(frame)
+    for start_channel in COMB_START_CHANNELS:
+        base = start_channel - 1
+        if base + 42 >= len(frame):
+            continue
+        # Ноль в серверном кадре также означает «канал никем не занят» /
+        # blackout. После простого 255-v он отправил бы развёрнутый прибор в
+        # зал, поэтому отсутствие команды всегда паркуем вертикально.
+        logical_tilt = frame[base] or COMB_PARK_TILT
+        mapped[base] = 255 - logical_tilt  # MotorY
+        for logical_pixel in range(COMB_PIXEL_COUNT):
+            src = base + 2 + logical_pixel * COMB_PIXEL_WIDTH
+            dst = base + 2 + (COMB_PIXEL_COUNT - 1 - logical_pixel) * COMB_PIXEL_WIDTH
+            mapped[dst:dst + COMB_PIXEL_WIDTH] = frame[src:src + COMB_PIXEL_WIDTH]
+    return bytes(mapped)
 
 IS_SERVICE = os.environ.get("LUMINA_SERVICE") == "1"
 if IS_SERVICE:
@@ -492,11 +520,15 @@ class WingSender:
                             frame = bytes(len(frame))
                             frame2 = bytes(len(frame2))
                 if send_zero:
-                    self._wing.send_dmx(bytes(self.dmx_len), bytes(self.dmx_len))
-                else:
-                    self._wing.send_dmx(frame, frame2)
-                self._last_sent = frame
-                self._last_sent_2 = frame2
+                    frame = bytes(self.dmx_len)
+                    frame2 = bytes(self.dmx_len)
+                # Аппаратная ориентация применяется ПОСЛЕ HTP-микса: иначе
+                # инверсия позиционного канала сломала бы приоритет источников.
+                physical_frame = map_comb_rig_orientation(frame)
+                physical_frame2 = map_comb_rig_orientation(frame2)
+                self._wing.send_dmx(physical_frame, physical_frame2)
+                self._last_sent = physical_frame
+                self._last_sent_2 = physical_frame2
             except Exception as e:
                 logging.error("Ошибка записи в крыло: %s — переподключение...", e)
                 try:
@@ -2531,12 +2563,14 @@ async def debug_dmx_handler(request: web.Request):
         "ch_500_512": data[499:512],
         # Что реально ушло в линию (в bypass = только LOCAL_SOURCE крыла)
         "sent_200_210": sent[199:210],
+        "sent_250_260": sent[249:260],
         # Юниверс 2 (17.08): отдельный кадр на OUT 2 — свой HTP-микс
         "u2_ch_1_8": data_2[0:8],
         "u2_ch_33_48": data_2[32:48],
         "u2_ch_200_210": data_2[199:210],
         "u2_ch_250_260": data_2[249:260],
         "u2_sent_200_210": sent_2[199:210],
+        "u2_sent_250_260": sent_2[249:260],
         "console_200_210": list(sender._sources.get(CONSOLE_SOURCE, bytes(512))[199:210]) if CONSOLE_AVAILABLE else None,
         "console_active": (lambda e: (e.active_num, e.masters.get("dimmer"), e.mode) if e is not None else None)(getattr(sender, "console_engine", None)),
         "wing_dev": "yes" if (sender._wing and sender._wing.dev) else "no",
