@@ -2,9 +2,11 @@
 import { LuminaNode, LuminaEdge, MixingStrategy, DmxValue, MidiState } from '../types';
 import { FIXTURE_LAYOUTS, DMX_BLACK_FLOOR, DIMMABLE_CHANNEL_TYPES } from '../constants';
 import { midiTrackManager } from '../services/midiTrackManager';
+import { DEFAULT_END_PATTERN } from './midiTrackConfig';
 import { DEFAULT_LIGHT_PARAMS, LightEngineParams } from './lightEngine';
 import { backstageOrderKey, notesFrames } from './backstageWash';
 import { applyTiltGuard, clampTilt, getTiltLimits, tiltChannelOffset } from './tiltGuard';
+import { debugLog } from './debugLog';
 
 // Cache structure to prevent re-sorting every frame
 interface GraphCache {
@@ -155,9 +157,10 @@ export const evaluateGraph = (
   inputLevels: Record<string, { low: number, mid: number, high: number }>,
   midiState: MidiState,
   cache?: { current: GraphCache }
-): { nodeValues: Record<string, number[]>, dmxUpdates: DmxValue[], nodeUpdates: Record<string, any> } => {
+): { nodeValues: Record<string, number[]>, dmxUpdates: DmxValue[], dmxUpdates2: DmxValue[], nodeUpdates: Record<string, any> } => {
   const nodeValues: Record<string, number[]> = {};
   const dmxUpdates: DmxValue[] = [];
+  const dmxUpdates2: DmxValue[] = [];
   const nodeUpdates: Record<string, any> = {};
 
   // 1. Check Cache Validity using numeric hash
@@ -255,6 +258,11 @@ export const evaluateGraph = (
   }
 
   const dmxAggregator: Record<number, number> = {};
+  // Второй юниверс (17.08): отдельная 512-пространство для приборов с
+  // universe=2 (OUT 2 крыла). Остальной движок пишет в U1.
+  const dmxAggregator2: Record<number, number> = {};
+  const AGG = (u?: number | string): Record<number, number> =>
+    (Number(u) === 2 ? dmxAggregator2 : dmxAggregator);
 
   // Evaluate Graph
   sortedNodes.forEach(node => {
@@ -720,6 +728,27 @@ export const evaluateGraph = (
         const group = safeGroup(params.group);
         const isActive = activeGroups.has(group) && !params.stop;
 
+        // Триггер «конец трека» (выход out-4): проигрывает endPattern
+        // (0-255 по шагам v/ms) в последние endSeconds секунд, после окна — 0.
+        // KKZ-пульт: провод на master-in = мигание (по фронтам 0↔255),
+        // на off-in = одно выключение. 16.08: свет зала мигает последние 3 сек.
+        const endSec = Math.max(0, params.endSeconds ?? 3);
+        const endPattern = Array.isArray(params.endPattern) && params.endPattern.length
+          ? params.endPattern
+          : DEFAULT_END_PATTERN;
+        const mtTime = midiTrackManager.getTime(node.id);
+        const mtDur = midiTrackManager.getDuration(node.id);
+        let endTrigger = 0;
+        if (mtDur > 0 && mtTime >= mtDur - endSec && mtTime < mtDur) {
+          const elapsed = mtTime - (mtDur - endSec);
+          let cum = 0;
+          for (const step of endPattern) {
+            if (elapsed < cum + step.ms) { endTrigger = step.v; break; }
+            cum += step.ms;
+          }
+          endTrigger = Math.max(0, Math.min(255, Math.round(endTrigger)));
+        }
+
         const inVal = (handle: string): number | null => {
           const vals = getInputsForHandle(node.id, handle, incomingEdgesByTarget, nodeValues, nodeMap);
           if (vals.length === 0) return null;
@@ -881,7 +910,7 @@ export const evaluateGraph = (
           // comb 137..175, midi-track 35..204 → мотор уезжал в 204).
           // Гашение освободившихся каналов — ownedChannelsRef в App.tsx,
           // удержание мотора — applyTiltGuard.
-          outputs = [0, mtl.park, 0, 0];
+          outputs = [0, mtl.park, 0, 0, 0];
           break;
         }
 
@@ -934,7 +963,7 @@ export const evaluateGraph = (
           // начнётся с парковки и плавного ввода света, а не со вспышки
           // из положения, где мотор стоял до стопа (28.07).
           params._activeSince = 0;
-          outputs = [0, 128, 0, 0];
+          outputs = [0, 128, 0, 0, 0];
           break;
         }
 
@@ -969,12 +998,13 @@ export const evaluateGraph = (
         // raysGateOff (score): cue гасит слой — записи нет вовсе.
         if (!raysGateOff) driveCombs.forEach((fixNode, fi) => {
           const startCh = fixNode.data.params?.startChannel || 1;
+          const agg = AGG(fixNode.data.params?.universe);
           const write = (ch: number, v: number) => {
             if (ch < 1 || ch > 512) return;
             // Во время парковки захватываем канал безусловно: иначе max-merge
             // с другим источником поднимет яркость до окончания выезда мотора.
-            if (override || isParking) dmxAggregator[ch] = v;
-            else if (dmxAggregator[ch] === undefined || v > dmxAggregator[ch]) dmxAggregator[ch] = v;
+            if (override || isParking) agg[ch] = v;
+            else if (agg[ch] === undefined || v > agg[ch]) agg[ch] = v;
           };
           write(startCh, motor);
           write(startCh + 1, spdY);
@@ -1021,12 +1051,13 @@ export const evaluateGraph = (
               const w = washFrames[Math.min(wi, washFrames.length - 1)];
               if (w.master > washMaster) washMaster = w.master;
               const startCh = fixNode.data.params?.startChannel || 1;
+              const agg = AGG(fixNode.data.params?.universe);
               const put = (off: number, v01: number) => {
                 const ch = startCh + off;
                 if (ch < 1 || ch > 512) return;
                 const v = blackFloor(Math.round(Math.max(0, Math.min(1, v01)) * 255), true);
-                if (override) dmxAggregator[ch] = v;
-                else if (dmxAggregator[ch] === undefined || v > dmxAggregator[ch]) dmxAggregator[ch] = v;
+                if (override) agg[ch] = v;
+                else if (agg[ch] === undefined || v > agg[ch]) agg[ch] = v;
               };
               // led_par_8ch: 0 Master, 1 R, 2 G, 3 B, 4 W, 5 Строб, 6 Макро, 7 Скорость
               put(0, w.master);
@@ -1036,8 +1067,8 @@ export const evaluateGraph = (
               put(4, w.w);
               const sCh = startCh + 5;
               if (sCh >= 1 && sCh <= 512) {
-                if (override || dmxAggregator[sCh] === undefined || w.strobe > dmxAggregator[sCh]) {
-                  dmxAggregator[sCh] = w.strobe;
+                if (override || agg[sCh] === undefined || w.strobe > agg[sCh]) {
+                  agg[sCh] = w.strobe;
                 }
               }
             });
@@ -1088,6 +1119,7 @@ export const evaluateGraph = (
               const w = bsFrames[Math.min(wi, bsFrames.length - 1)];
               const startCh = fixNode.data.params?.startChannel || 1;
               const fp = fixNode.data.params || {};
+              const agg = AGG(fp.universe);
               const layout = fp.customLayout
                 || FIXTURE_LAYOUTS[fp.fixtureType as keyof typeof FIXTURE_LAYOUTS] || [];
               const hasMaster = layout.some((c: any) => c?.type === 'master');
@@ -1105,8 +1137,8 @@ export const evaluateGraph = (
                 const ch = startCh + (typeof chan?.offset === 'number' ? chan.offset : off);
                 if (ch < 1 || ch > 512) return;
                 const v = blackFloor(Math.round(Math.max(0, Math.min(1, v01)) * 255), true);
-                if (override) dmxAggregator[ch] = v;
-                else if (dmxAggregator[ch] === undefined || v > dmxAggregator[ch]) dmxAggregator[ch] = v;
+                if (override) agg[ch] = v;
+                else if (agg[ch] === undefined || v > agg[ch]) agg[ch] = v;
               });
             });
           }
@@ -1115,7 +1147,9 @@ export const evaluateGraph = (
         outputs = [Math.max(0, Math.min(255, Math.round(frame.energy * 40))), motor,
           Math.max(0, Math.min(255, Math.round(washMaster * 255))),
           // out-3 «ЛУЧИ»: по проводу — та же энергия кадра, что и out-0.
-          Math.max(0, Math.min(255, Math.round(frame.energy * 40)))];
+          Math.max(0, Math.min(255, Math.round(frame.energy * 40))),
+          // out-4 «Конец трека»: триггер для KKZ-пульта (0→255 за endSeconds).
+          endTrigger];
         break;
       }
 
@@ -1141,8 +1175,9 @@ export const evaluateGraph = (
           finalVal = blackFloor(finalVal, DIMMABLE_CHANNEL_TYPES.has(chDef?.type));
 
           const ch = startChannel + idx;
-          if (ch >= 1 && ch <= 512 && (dmxAggregator[ch] === undefined || finalVal > dmxAggregator[ch])) {
-              dmxAggregator[ch] = finalVal;
+          const agg = AGG(params.universe);
+          if (ch >= 1 && ch <= 512 && (agg[ch] === undefined || finalVal > agg[ch])) {
+              agg[ch] = finalVal;
           }
           
           return val;
@@ -1154,11 +1189,12 @@ export const evaluateGraph = (
         // Входы пульта KKZ (управление с других нод — звук, таймер, LFO):
         // значение — максимум по рёбрам на входе, -1 если вход не подключён.
         // Нода сама детектит фронты 0↔1 и шлёт HTTP только при переходе.
+        // off-in (4-й) — триггер «выключить все автоматы» по фронту 0→255.
         const readIn = (handle: string): number => {
           const vals = getInputsForHandle(node.id, handle, incomingEdgesByTarget, nodeValues, nodeMap);
           return vals.length ? Math.max(...vals) : -1;
         };
-        outputs = [readIn('master-in'), readIn('dev-0-in'), readIn('dev-1-in')];
+        outputs = [readIn('master-in'), readIn('dev-0-in'), readIn('dev-1-in'), readIn('off-in')];
         break;
       }
     }
@@ -1176,21 +1212,29 @@ export const evaluateGraph = (
   // Заодно канал мотора никогда не остаётся неуправляемым: приборы при
   // включении сами калибруются в 0 = луч в зал, поэтому пустой канал = парковка.
   const tiltChannels: number[] = [];
+  const tiltChannels2: number[] = [];
   nodes.forEach(n => {
     if (n.type !== 'fixture') return;
     const off = tiltChannelOffset(n.data.params?.fixtureType);
     if (off === null) return;
-    tiltChannels.push((n.data.params?.startChannel || 1) + off);
+    const ch = (n.data.params?.startChannel || 1) + off;
+    if (Number(n.data.params?.universe) === 2) tiltChannels2.push(ch);
+    else tiltChannels.push(ch);
   });
   applyTiltGuard(dmxAggregator, tiltChannels);
+  applyTiltGuard(dmxAggregator2, tiltChannels2);
 
   // Convert DMX values to updates
   Object.entries(dmxAggregator).forEach(([ch, val]) => {
       dmxUpdates.push({ ch: parseInt(ch), val });
   });
+  Object.entries(dmxAggregator2).forEach(([ch, val]) => {
+      dmxUpdates2.push({ ch: parseInt(ch), val });
+  });
 
   // 3. Conflict Detection
   const channelClaims: Record<number, string[]> = {};
+  const channelClaims2: Record<number, string[]> = {};
   const fixtures = nodes.filter(n => n.type === 'fixture');
   const activeFixtureNodes = fixtures.filter(n => activeGroups.has(safeGroup(n.data.params?.group)));
 
@@ -1198,12 +1242,21 @@ export const evaluateGraph = (
       const start = node.data.params?.startChannel || 1;
       const fType = node.data.params?.fixtureType || 'dimmer';
       const layout = node.data.params?.customLayout || FIXTURE_LAYOUTS[fType as keyof typeof FIXTURE_LAYOUTS] || FIXTURE_LAYOUTS.dimmer;
+      const claims = Number(node.data.params?.universe) === 2 ? channelClaims2 : channelClaims;
       for (let i = 0; i < layout.length; i++) {
           const ch = start + i;
-          if (!channelClaims[ch]) channelClaims[ch] = [];
-          channelClaims[ch].push(node.id);
+          if (!claims[ch]) claims[ch] = [];
+          claims[ch].push(node.id);
       }
   });
+
+  // Стаки (патч-нода): намеренные параллельные приборы на одних адресах
+  // (спаренные COB на 200 и т.п.) — для приборов из одного стака перекрытие
+  // каналов НЕ считается конфликтом.
+  const stackPatch = nodes.find(n => n.type === 'patch');
+  const stacks: string[][] = Array.isArray(stackPatch?.data?.params?.stacks)
+      ? stackPatch.data.params.stacks
+      : [];
 
   fixtures.forEach(node => {
       const start = node.data.params?.startChannel || 1;
@@ -1214,23 +1267,34 @@ export const evaluateGraph = (
       const isActive = activeGroups.has(safeGroup(node.data.params?.group));
       
       if (isActive) {
+          const claims = Number(node.data.params?.universe) === 2 ? channelClaims2 : channelClaims;
           for (let i = 0; i < layout.length; i++) {
-              if (channelClaims[start + i] && channelClaims[start + i].length > 1) {
-                  hasConflict = true;
-                  break;
+              if (claims[start + i] && claims[start + i].length > 1) {
+                  const claimers = claims[start + i];
+                  const others = claimers.filter(c => c !== node.id);
+                  // Все конфликтующие приборы в одном и том же стаке — намеренный параллель
+                  const stackedTogether = others.length > 0 &&
+                      stacks.some(s => s.includes(node.id) && others.every(o => s.includes(o)));
+                  if (!stackedTogether) {
+                      hasConflict = true;
+                      break;
+                  }
               }
           }
       }
 
       if (hasConflict !== !!node.data.params?.hasConflict || isActive !== !!node.data.params?.isActive) {
           if (!node.data.params) node.data.params = {};
+          if (hasConflict !== !!node.data.params?.hasConflict) {
+              debugLog.log('graph', `conflict ${hasConflict ? 'ON' : 'OFF'} ${node.id} (${node.data.params?.fixtureType}@${start}, groups=${node.data.params?.group}, stacked=${(node.data.params?.stackIds || []).length > 0})`);
+          }
           node.data.params.hasConflict = hasConflict;
           node.data.params.isActive = isActive;
           nodeUpdates[node.id] = { ...nodeUpdates[node.id], hasConflict, isActive };
       }
   });
 
-  return { nodeValues, dmxUpdates, nodeUpdates };
+  return { nodeValues, dmxUpdates, dmxUpdates2, nodeUpdates };
 };
 
 // Named band outputs share the same 0/1/2 layout

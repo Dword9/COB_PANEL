@@ -247,6 +247,9 @@ export const MidiTrackNode: React.FC<NodeProps<LuminaNode>> = ({ id, data, selec
       <Handle type="source" position={Position.Right} id="out-3"
         title="ЛУЧИ: энергия кадра (0-255). Провод на вход comb-in расчёски = расчёска играет; без проводов — играют все найденные"
         style={{ top: '75%' }} className="!bg-orange-400" />
+      <Handle type="source" position={Position.Right} id="out-4"
+        title="КОНЕЦ ТРЕКА: 0, а в последние endSeconds (по умолчанию 3) — 255. Провод на вход off-in пульта KKZ = свет гаснет за 3 сек до конца трека"
+        style={{ top: '90%' }} className="!bg-red-400" />
 
       {editorOpen && (
         <MidiTrackEditor nodeId={id} c={c} onClose={() => setEditorOpen(false)} />

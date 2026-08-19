@@ -7,6 +7,7 @@ import os
 import sys
 import threading
 import time
+import datetime
 import webbrowser
 import subprocess
 from typing import Any, Dict, Set
@@ -153,9 +154,15 @@ class WingSender:
     def __init__(self, dmx_len: int):
         self.dmx_len = dmx_len
         self.dmx_data = bytearray(dmx_len)
+        # Второй юниверс (17.08): драйвер крыла умеет слать ОТДЕЛЬНЫЙ кадр
+        # на OUT 2 (wireless-линия) — send_dmx(u1, u2). Раньше U2 = зеркало
+        # U1 (тот же кадр в оба выхода); теперь у U2 свой HTP-микс и своя
+        # карта патчинга (поле universe у приборов на фронте).
+        self.dmx_data_2 = bytearray(dmx_len)
         # Буферы источников: ключ -> bytearray(dmx_len). Ключ WS-клиента —
         # id(ws), крыло пишет в LOCAL_SOURCE. dmx_data = поканальный max.
         self._sources: Dict[Any, bytearray] = {}
+        self._sources_2: Dict[Any, bytearray] = {}
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
@@ -185,6 +192,7 @@ class WingSender:
         self._list_sources = set()
         # Последний кадр, реально ушедший в линию (для /api/debug/dmx).
         self._last_sent = bytes(self.dmx_len)
+        self._last_sent_2 = bytes(self.dmx_len)
         # Тумблер световой волны (14.08): серверный, синхронизируется панелям.
         # По умолчанию OFF; стартовая волна (boot=1) играет всегда.
         self._wing_wave_enabled = False
@@ -461,19 +469,34 @@ class WingSender:
                                 if v > manual[i]:
                                     manual[i] = v
                         frame = bytes(manual)
+                        # U2 в bypass: те же правила, свой LOCAL_SOURCE-вклад.
+                        buf2 = self._sources_2.get(LOCAL_SOURCE)
+                        manual2 = bytearray(buf2) if buf2 else bytearray(self.dmx_len)
+                        for s, b in self._sources_2.items():
+                            if s is LOCAL_SOURCE or s in self._list_sources:
+                                continue
+                            for i in range(self.dmx_len):
+                                v = b[i]
+                                if v > manual2[i]:
+                                    manual2[i] = v
+                        frame2 = bytes(manual2)
                         if self._blackout:
                             frame = bytes(len(frame))
+                            frame2 = bytes(len(frame2))
                     else:
                         self._bypass_zeroed = False
                         send_zero = False
                         frame = bytes(self.dmx_data)
+                        frame2 = bytes(self.dmx_data_2)
                         if self._blackout:
                             frame = bytes(len(frame))
+                            frame2 = bytes(len(frame2))
                 if send_zero:
                     self._wing.send_dmx(bytes(self.dmx_len), bytes(self.dmx_len))
                 else:
-                    self._wing.send_dmx(frame, frame)
+                    self._wing.send_dmx(frame, frame2)
                 self._last_sent = frame
+                self._last_sent_2 = frame2
             except Exception as e:
                 logging.error("Ошибка записи в крыло: %s — переподключение...", e)
                 try:
@@ -486,22 +509,23 @@ class WingSender:
                     time.sleep(2.0)
             time.sleep(interval)
 
-    def set_channel(self, ch_index: int, value: int, source: Any = LOCAL_SOURCE) -> None:
-        """Записать канал от имени источника и пересчитать HTP-микс."""
+    def set_channel(self, ch_index: int, value: int, source: Any = LOCAL_SOURCE, universe: int = 1) -> None:
+        """Записать канал от имени источника и пересчитать HTP-микс (юниверс 1 или 2)."""
         value = max(0, min(255, int(value)))
         if not (0 <= ch_index < self.dmx_len):
             return
         with self._lock:
-            buf = self._sources.get(source)
+            sources = self._sources_2 if universe == 2 else self._sources
+            buf = sources.get(source)
             if buf is None:
                 buf = bytearray(self.dmx_len)
-                self._sources[source] = buf
+                sources[source] = buf
             if buf[ch_index] == value:
                 return  # источник не изменился — микс тот же
             buf[ch_index] = value
-            self._remix_channel(ch_index)
+            self._remix_channel(ch_index, universe)
 
-    def set_source_frame(self, source: Any, frame) -> None:
+    def set_source_frame(self, source: Any, frame, universe: int = 1) -> None:
         """Заменить кадр источника целиком и пересчитать HTP-микс (консоль).
 
         Движок консоли (CONSOLE_SOURCE) шлёт полный кадр 512 при каждом
@@ -511,23 +535,26 @@ class WingSender:
         if len(frame) != self.dmx_len:
             return
         with self._lock:
+            sources = self._sources_2 if universe == 2 else self._sources
             buf = bytearray(frame)
-            if self._sources.get(source) == buf:
+            if sources.get(source) == buf:
                 return
-            self._sources[source] = buf
+            sources[source] = buf
             for ch in range(self.dmx_len):
-                self._remix_channel(ch)
+                self._remix_channel(ch, universe)
 
-    def _remix_channel(self, ch_index: int) -> None:
-        """HTP по одному каналу. Вызывать под self._lock."""
+    def _remix_channel(self, ch_index: int, universe: int = 1) -> None:
+        """HTP по одному каналу юниверса. Вызывать под self._lock."""
+        sources = self._sources_2 if universe == 2 else self._sources
+        out = self.dmx_data_2 if universe == 2 else self.dmx_data
         top = 0
-        for buf in self._sources.values():
+        for buf in sources.values():
             v = buf[ch_index]
             if v > top:
                 top = v
                 if top == 255:
                     break
-        self.dmx_data[ch_index] = top
+        out[ch_index] = top
 
     def drop_source(self, source: Any) -> bool:
         """Убрать источник (ушёл WS-клиент) и пересчитать весь микс.
@@ -536,19 +563,26 @@ class WingSender:
         в HTP-миксе и держало бы приборы включёнными.
         """
         with self._lock:
-            if self._sources.pop(source, None) is None:
+            removed = self._sources.pop(source, None)
+            removed2 = self._sources_2.pop(source, None)
+            if removed is None and removed2 is None:
                 return False
             for ch in range(self.dmx_len):
-                self._remix_channel(ch)
+                self._remix_channel(ch, 1)
+                self._remix_channel(ch, 2)
             return True
 
     def reset_source(self, source: Any) -> None:
-        """Обнулить буфер источника, не удаляя его (blackout от клиента)."""
+        """Обнулить буфер источника (U1 и U2), не удаляя его (blackout от клиента)."""
         with self._lock:
             if source in self._sources:
                 self._sources[source] = bytearray(self.dmx_len)
                 for ch in range(self.dmx_len):
-                    self._remix_channel(ch)
+                    self._remix_channel(ch, 1)
+            if source in self._sources_2:
+                self._sources_2[source] = bytearray(self.dmx_len)
+                for ch in range(self.dmx_len):
+                    self._remix_channel(ch, 2)
 
     def set_blackout(self, on: bool) -> None:
         """Глобальный blackout (14.08): нулевой кадр в крыло, пока включён."""
@@ -611,16 +645,22 @@ class WingSender:
                 except Exception as e:
                     logging.warning("Применение роутинга не удалось: %s", e)
             self._sources.pop(LOCAL_SOURCE, None)
+            self._sources_2.pop(LOCAL_SOURCE, None)
             for ch in range(self.dmx_len):
-                self._remix_channel(ch)
+                self._remix_channel(ch, 1)
+                self._remix_channel(ch, 2)
 
     def source_stats(self) -> Dict[str, int]:
         """Диагностика: сколько каналов держит каждый источник (не ноль)."""
         with self._lock:
-            return {
+            stats = {
                 ("wing" if s is LOCAL_SOURCE else f"ws:{s}"): sum(1 for v in buf if v)
                 for s, buf in self._sources.items()
             }
+            for s, buf in self._sources_2.items():
+                key = f"u2:{'wing' if s is LOCAL_SOURCE else 'ws:' + str(s)}"
+                stats[key] = sum(1 for v in buf if v)
+            return stats
 
     def send(self) -> None:
         pass  # стриминг делает свой поток на WING_FPS
@@ -2176,6 +2216,17 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                     for it in data:
                         if isinstance(it, dict) and "ch" in it and "val" in it:
                             sender.set_channel(int(it["ch"]) - 1, it["val"], src)
+                elif isinstance(data, dict) and data.get("u") == 2 and isinstance(data.get("values"), list):
+                    # Полный кадр юниверса 2 (патч-нода/автоматика). Аналог
+                    # списка U1: источник = src, в bypass отсекается.
+                    sender._list_sources.add(src)
+                    for pair in data["values"]:
+                        if isinstance(pair, (list, tuple)) and len(pair) >= 2:
+                            try:
+                                ch, val = int(pair[0]), int(pair[1])
+                            except (TypeError, ValueError):
+                                continue
+                            sender.set_channel(ch - 1, val, src, universe=2)
                 elif isinstance(data, dict) and data.get("type") in ("scene_set", "tpl_save", "tpl_load", "tpl_del"):
                     # Сцены/шаблоны COB-пульта: общее хранилище для всех клиентов.
                     # Любое изменение -> файл + бродкаст, остальные устройства
@@ -2352,6 +2403,10 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                             sender.set_bands(payload["bands"])
                         elif "leds" in payload:
                             sender.set_leds(payload["leds"])
+                elif isinstance(data, dict) and data.get("u") == 2 and "ch" in data and "val" in data:
+                    # Одиночная запись юниверса 2 (ручная поверхность COB-панели).
+                    sender.set_channel(int(data["ch"]) - 1, data["val"], LOCAL_SOURCE, universe=2)
+                    schedule_depot_live_broadcast(app)
                 elif isinstance(data, dict) and "ch" in data and "val" in data:
                     # 15.08: веб-панель = та же ручная поверхность, что крыло —
                     # пишем в общий LOCAL_SOURCE (last-write-wins), а не в
@@ -2409,6 +2464,51 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
     return ws
 
 # ================== APP ==================
+async def debug_log_handler(request: web.Request):
+    """Приём отладочного лога действий фронта (web/utils/debugLog.ts).
+
+    Пишет в logs/debug_web.log — трасса пользовательских действий для
+    отладки (адреса/группы/стаки патч-ноды, WS-состояния, конфликты).
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "bad json"})
+    logs = body.get("logs") if isinstance(body, dict) else body
+    if not isinstance(logs, list):
+        return web.json_response({"ok": False, "error": "logs must be a list"})
+    log_dir = os.path.join(os.path.dirname(__file__), "logs")
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+    except Exception:
+        pass
+    n = 0
+    try:
+        with open(os.path.join(log_dir, "debug_web.log"), "a", encoding="utf-8") as f:
+            for e in logs:
+                if not isinstance(e, dict):
+                    continue
+                t = e.get("t")
+                if isinstance(t, (int, float)):
+                    ts = datetime.datetime.fromtimestamp(t / 1000.0).strftime("%H:%M:%S.%f")[:-3]
+                else:
+                    ts = "?"
+                tag = str(e.get("tag", "?"))
+                lvl = str(e.get("level", "info"))
+                msg = str(e.get("msg", ""))
+                line = f"{ts} | WEB {lvl:<5} | [{tag}] {msg}"
+                data = e.get("data")
+                if data not in (None, ""):
+                    line += " | " + json.dumps(data, ensure_ascii=False)[:800]
+                f.write(line + "\n")
+                n += 1
+    except Exception as exc:
+        logging.getLogger("lumina_debug").error("web-log write failed: %s", exc)
+        return web.json_response({"ok": False, "error": str(exc)})
+    logging.getLogger("lumina_debug").info("web-log +%d/%d", n, len(logs))
+    return web.json_response({"ok": True, "n": n})
+
+
 async def debug_dmx_handler(request: web.Request):
     """Временная отладка: дамп значений ключевых каналов DMX-буфера."""
     sender = request.app.get("artnet")
@@ -2417,6 +2517,8 @@ async def debug_dmx_handler(request: web.Request):
     with sender._lock:
         data = list(sender.dmx_data)
         sent = list(getattr(sender, "_last_sent", bytes(512)))
+        data_2 = list(sender.dmx_data_2)
+        sent_2 = list(getattr(sender, "_last_sent_2", bytes(512)))
     # Каналы 1-8 (фейдеры крыла), 33-48 (кулисы: Backdrop L — первая пара), 200-207 (COB), 250-260 (расчёска мотор/скорость/первые лучи)
     return web.json_response({
         "ch_1_8": data[0:8],
@@ -2429,6 +2531,12 @@ async def debug_dmx_handler(request: web.Request):
         "ch_500_512": data[499:512],
         # Что реально ушло в линию (в bypass = только LOCAL_SOURCE крыла)
         "sent_200_210": sent[199:210],
+        # Юниверс 2 (17.08): отдельный кадр на OUT 2 — свой HTP-микс
+        "u2_ch_1_8": data_2[0:8],
+        "u2_ch_33_48": data_2[32:48],
+        "u2_ch_200_210": data_2[199:210],
+        "u2_ch_250_260": data_2[249:260],
+        "u2_sent_200_210": sent_2[199:210],
         "console_200_210": list(sender._sources.get(CONSOLE_SOURCE, bytes(512))[199:210]) if CONSOLE_AVAILABLE else None,
         "console_active": (lambda e: (e.active_num, e.masters.get("dimmer"), e.mode) if e is not None else None)(getattr(sender, "console_engine", None)),
         "wing_dev": "yes" if (sender._wing and sender._wing.dev) else "no",
@@ -2638,6 +2746,7 @@ def create_app() -> web.Application:
     app.router.add_get("/api/debug/dmx", debug_dmx_handler)
     app.router.add_get("/api/calibration", calibration_handler)
     app.router.add_post("/api/calibration", calibration_save_handler)
+    app.router.add_post("/debug-log", debug_log_handler)
     
     # API для проектов
     app.router.add_get("/api/projects", list_projects)

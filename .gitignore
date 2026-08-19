@@ -48,3 +48,10 @@ xxx*.txt
 
 # --- backups ---
 DEV-NOTES_Back.7z
+
+# --- dev-скриншоты webshot (тестовые артефакты) ---
+docs/dev/
+
+# --- runtime debug logs ---
+logs/
+debug_web.log

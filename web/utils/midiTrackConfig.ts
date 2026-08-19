@@ -40,6 +40,19 @@ export type BackstageMode = 'notes' | 'comet';
 /** '0' = каналы 1/2 звуковой карты, '2' = каналы 3/4 */
 export type SyncPair = '0' | '2';
 
+/** Шаг финального паттерна: значение 0-255 на out-4 в течение ms. */
+export interface EndPatternStep { v: number; ms: number; }
+
+/**
+ * Дефолт «финал трека»: 3 мигания по 0.6 с (ВКЛ/ВЫКЛ/ВКЛ/ВЫКЛ/ВКЛ/ВЫКЛ).
+ * Общая ссылка для движка (graphEngine) и фабрики дефолтов — эквивалентность
+ * теста сохраняется, паттерн не копируется при сериализации, если не менялся.
+ */
+export const DEFAULT_END_PATTERN: EndPatternStep[] = [
+  { v: 255, ms: 600 }, { v: 0, ms: 600 }, { v: 255, ms: 600 },
+  { v: 0, ms: 600 }, { v: 255, ms: 600 }, { v: 0, ms: 300 },
+];
+
 export interface MidiTrackParams {
   // --- Источник (встроенный; внешняя music-track нода перекрывает по track-in)
   audioUrl: string | null;
@@ -91,6 +104,15 @@ export interface MidiTrackParams {
   parkMs: number;
   /** мс плавного ввода света после парковки */
   fadeInMs: number;
+
+  // --- Конец трека (выход out-4, 16.08)
+  /** за сколько секунд до конца трека out-4 проигрывает endPattern */
+  endSeconds: number;
+  /** паттерн значений 0-255 на out-4 в последние endSeconds; после окна — 0.
+   *  Универсальный примитив: вкл/выкл (мигание), дим, строб — любой
+   *  последовательности значений с длительностями. Провод на вход пульта
+   *  KKZ (master-in = мигание, off-in = одно выключение). */
+  endPattern: EndPatternStep[];
 
   // --- Верхний свет (COB-блайндеры)
   wash: boolean;
@@ -150,6 +172,9 @@ export const defaultMidiTrackParams = (): MidiTrackParams => ({
   motorSpeed: 80,
   parkMs: 1500,
   fadeInMs: 600,
+
+  endSeconds: 3,
+  endPattern: DEFAULT_END_PATTERN.map(s => ({ ...s })),
 
   wash: true,
   washBrightness: 1,

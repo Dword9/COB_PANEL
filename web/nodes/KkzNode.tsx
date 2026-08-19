@@ -4,11 +4,18 @@ import { Power, Zap, RefreshCw, Settings2, Wifi, WifiOff, Plug } from 'lucide-re
 import { renderRegistry } from '../utils/renderRegistry';
 import { kkzFetch, KKZ_URL, KKZ_PIN } from '../electron/kkz-client.mjs';
 
-// Входной пин (target) для управления с других нод. На строке-переключателе.
-const CtrlIn: React.FC<{ id: string; label: string; top: string; active?: boolean }> = ({ id, label, top, active }) => (
-  <Handle type="target" position={Position.Left} id={id} title={label}
-    style={{ top, left: -14 }}
-    className={active ? '!bg-fuchsia-400 shadow-[0_0_8px_#d946ef]' : '!bg-zinc-600'} />
+// Вход управления с другой ноды: строка с пином слева по краю (как на
+// MIDI-треке/палитре). Подпись привязана к строке — не «висит в воздухе».
+const CtrlRow: React.FC<{
+  id: string; label: string; active?: boolean;
+  pinClass?: string; glow?: string; activeText?: string;
+}> = ({ id, label, active, pinClass = '!bg-sky-400', glow = '#38bdf8', activeText = 'text-fuchsia-400' }) => (
+  <div className="relative flex items-center gap-2 py-0.5">
+    <Handle type="target" position={Position.Left} id={id} title={label}
+      style={{ top: '50%', left: -14, boxShadow: active ? `0 0 8px ${glow}` : undefined }}
+      className={pinClass} />
+    <span className={`text-[9px] truncate flex-1 ${active ? activeText : 'text-zinc-500'}`}>{label}</span>
+  </div>
 );
 
 interface KkzState {
@@ -22,7 +29,6 @@ export const KkzNode = ({ data, id, selected }: any) => {
   const params = {
     url: KKZ_URL,
     pin: KKZ_PIN,
-    armed: [true, true],
     master: false,
     ...data.params,
   };
@@ -32,7 +38,6 @@ export const KkzNode = ({ data, id, selected }: any) => {
   const [showConfig, setShowConfig] = useState(false);
   const [devices, setDevices] = useState<string[]>([]);
   const [states, setStates] = useState<KkzState[]>([]);
-  const [armed, setArmed] = useState<boolean[]>(params.armed);
   const [master, setMaster] = useState<boolean>(!!params.master);
   const [flashActive, setFlashActive] = useState(false);
   const [flashTarget, setFlashTarget] = useState<boolean | null>(null);
@@ -41,7 +46,8 @@ export const KkzNode = ({ data, id, selected }: any) => {
   const [error, setError] = useState<string | null>(null);
 
   const masterRef = useRef(master);
-  const armedRef = useRef(armed);
+  const devicesRef = useRef<string[]>([]);
+  const statesRef = useRef<KkzState[]>([]);
   const flashTargetRef = useRef<boolean | null>(null);
   const busyRef = useRef(false);
   const urlRef = useRef(url);
@@ -49,7 +55,8 @@ export const KkzNode = ({ data, id, selected }: any) => {
   const flashActiveRef = useRef(false);
 
   masterRef.current = master;
-  armedRef.current = armed;
+  devicesRef.current = devices;
+  statesRef.current = states;
   flashTargetRef.current = flashTarget;
   busyRef.current = busy;
   urlRef.current = url;
@@ -82,20 +89,30 @@ export const KkzNode = ({ data, id, selected }: any) => {
     });
   }, [api]);
 
-  const armedIndices = useCallback(() =>
-    armedRef.current.map((a, i) => (a ? i : -1)).filter(i => i >= 0), []);
+  // Все реле пульта (для master/off — «свет зала» целиком; стабильный таргет
+  // для паттернов-миганий, не зависит от текущей физики).
+  const allIndices = useCallback(() =>
+    devicesRef.current.map((_, i) => i), []);
 
   const loadStatus = useCallback(async () => {
     try {
       const s = await api('/api/status');
-      setStates(Array.isArray(s) ? s : []);
+      const arr = Array.isArray(s) ? s : [];
+      setStates(arr);
+      statesRef.current = arr;
       setConnected(true);
       setError(null);
+      // Тумблеры рисуются прямо из states (факт) — локальной памяти нет.
     } catch (e: any) {
       setConnected(false);
       setError(e?.message || 'status error');
     }
   }, [api]);
+
+  // Физически горящие реле (из последнего опроса) — для ФЛЕШ (инверсия того,
+  // что горит) и одиночных команд.
+  const physOnIndices = useCallback(() =>
+    statesRef.current.map((st, i) => (st?.on ? i : -1)).filter(i => i >= 0), []);
 
   // Первичная загрузка устройств (имена) + статус
   useEffect(() => {
@@ -103,30 +120,20 @@ export const KkzNode = ({ data, id, selected }: any) => {
     const init = async () => {
       try {
         const cfg = await api('/api/config');
-        if (alive) {
-          setDevices(cfg.devices || []);
-          setArmed(prev => {
-            const n = (cfg.devices || []).length;
-            if (prev.length === n) return prev;
-            const next = new Array(n).fill(true);
-            for (let i = 0; i < Math.min(n, prev.length); i++) next[i] = prev[i];
-            persist('armed', next);
-            return next;
-          });
-        }
+        if (alive) setDevices(cfg.devices || []);
       } catch (e: any) {
         if (alive) { setConnected(false); setError(e?.message || 'config error'); }
       }
       if (alive) loadStatus();
     };
     init();
-    const t = setInterval(loadStatus, 2000);
+    const t = setInterval(loadStatus, 5000);
     // Chromium throttles background timers to ~1/min when the window is
     // hidden in the tray; poll immediately when the window becomes visible.
     const onVis = () => { if (document.visibilityState === 'visible') loadStatus(); };
     document.addEventListener('visibilitychange', onVis);
     return () => { alive = false; clearInterval(t); document.removeEventListener('visibilitychange', onVis); };
-  }, [api, loadStatus, persist]);
+  }, [api, loadStatus]);
 
   const run = useCallback(async (fn: () => Promise<void>) => {
     if (busyRef.current) return;
@@ -143,36 +150,30 @@ export const KkzNode = ({ data, id, selected }: any) => {
 
   const toggleDevice = useCallback(async (i: number) => {
     await run(async () => {
-      const cur = armedRef.current;
-      const next = [...cur];
-      if (next[i]) {
-        next[i] = false;
-        setArmed(next);
-        persist('armed', next);
-        await batch([i], false, 'main');
-      } else {
-        next[i] = true;
-        setArmed(next);
-        persist('armed', next);
-        await batch([i], masterRef.current, 'main');
-      }
+      // Тумблер = ФАКТ из последнего опроса. Клик = прямая команда реле.
+      const st = statesRef.current[i];
+      const on = !(st?.on ?? false);
+      await batch([i], on, 'main');
       loadStatus();
     });
-  }, [run, batch, loadStatus, persist]);
+  }, [run, batch, loadStatus]);
 
   const setMasterState = useCallback(async (on: boolean) => {
     await run(async () => {
       setMaster(on);
       persist('master', on);
-      const idx = armedIndices();
+      // ГП = «свет зала» целиком: ВКЛ/ВЫКЛ ВСЕХ реле. Стабильный таргет —
+      // паттерны-мигания с него работают независимо от текущей физики,
+      // а внешнее включение (телефон) тоже гасится (баг 16.08).
+      const idx = allIndices();
       if (idx.length) await batch(idx, on, 'main');
       loadStatus();
     });
-  }, [run, batch, loadStatus, persist, armedIndices]);
+  }, [run, batch, loadStatus, persist, allIndices]);
 
   const flashPress = useCallback(() => {
     if (flashActiveRef.current) return;
-    const idx = armedIndices();
+    const idx = physOnIndices();
     flashActiveRef.current = true;
     setFlashActive(true);
     if (!idx.length) return;
@@ -180,62 +181,74 @@ export const KkzNode = ({ data, id, selected }: any) => {
     flashTargetRef.current = target;
     setFlashTarget(target);
     batch(idx, target, 'flash').catch(() => {});
-  }, [batch, armedIndices]);
+  }, [batch, physOnIndices]);
 
   const flashRelease = useCallback(() => {
     if (!flashActiveRef.current) return;
     flashActiveRef.current = false;
     setFlashActive(false);
-    const idx = armedIndices();
+    const idx = physOnIndices();
     const target = flashTargetRef.current;
     flashTargetRef.current = null;
     setFlashTarget(null);
     if (!idx.length || target === null) return;
     batch(idx, !target, 'flash').catch(() => {});
     loadStatus();
-  }, [batch, armedIndices, loadStatus]);
+  }, [batch, physOnIndices, loadStatus]);
 
   // --- Входы управления с других нод (звук/таймер/LFO) -------------------
   // Движок шлёт [master, dev0, dev1] каждый кадр; тут сравниваем с прошлым
   // значением и шлём HTTP ТОЛЬКО по фронту 0↔1 (грабля: автоматы Tuya
   // работают секундами, молотить их каждым кадром нельзя).
-  const [inActive, setInActive] = useState<[boolean, boolean, boolean]>([false, false, false]);
-  const prevIn = useRef<[number, number, number]>([-1, -1, -1]);
+  const [inActive, setInActive] = useState<[boolean, boolean, boolean, boolean]>([false, false, false, false]);
+  const prevIn = useRef<[number, number, number, number]>([-1, -1, -1, -1]);
 
   useEffect(() => {
     renderRegistry.register(id, (vals: any) => {
-      const v: [number, number, number] = Array.isArray(vals) && vals.length >= 3
-        ? [vals[0], vals[1], vals[2]]
-        : [-1, -1, -1];
+      const a = Array.isArray(vals) ? vals : [];
+      const v: [number, number, number, number] = a.length >= 4
+        ? [a[0], a[1], a[2], a[3]]
+        : a.length >= 3
+          ? [a[0], a[1], a[2], -1]
+          : [-1, -1, -1, -1];
       const prev = prevIn.current;
-      const next: [boolean, boolean, boolean] = [
+      const next: [boolean, boolean, boolean, boolean] = [
         v[0] !== prev[0],
         v[1] !== prev[1],
         v[2] !== prev[2],
+        v[3] !== prev[3],
       ];
       prevIn.current = v;
-      if (!next[0] && !next[1] && !next[2]) return;
+      if (!next[0] && !next[1] && !next[2] && !next[3]) return;
 
-      setInActive([v[0] >= 0, v[1] >= 0, v[2] >= 0]);
+      setInActive([v[0] >= 0, v[1] >= 0, v[2] >= 0, v[3] >= 0]);
 
       const send = (devices: number[], on: boolean, src: string) => {
         if (!devices.length) return Promise.resolve();
         return batch(devices, on, src).catch(() => { setConnected(false); setError('in-command failed'); });
       };
 
-      // Вход master-in: ВКЛ все armed / ВЫКЛ все armed (как кнопка мастера)
+      // Вход master-in: ВКЛ/ВЫКЛ всех реле (свет зала; паттерн-мигание — по
+      // каждому фронту: >127 = ВКЛ, ≤127 = ВЫКЛ)
       if (next[0] && v[0] >= 0) {
         const on = v[0] > 127;
         setMaster(on);
         persist('master', on);
-        send(armedRef.current.map((a, i) => (a ? i : -1)).filter(i => i >= 0), on, 'in');
+        send(allIndices(), on, 'in');
       }
       // Входы dev-N-in: прямое вкл/выкл конкретного автомата
       if (next[1] && v[1] >= 0) send([0], v[1] > 127, 'in');
       if (next[2] && v[2] >= 0) send([1], v[2] > 127, 'in');
+      // Вход off-in: фронт 0→255 = выключить все реле (конец трека, 16.08).
+      // Падает обратно в 0 (трек закончился) — повторной команды нет.
+      if (next[3] && v[3] > 127) {
+        setMaster(false);
+        persist('master', false);
+        send(allIndices(), false, 'in');
+      }
     });
     return () => renderRegistry.unregister(id);
-  }, [id, batch, persist]);
+  }, [id, batch, persist, allIndices]);
 
   const applyConfig = () => {
     const u = url.trim().replace(/\/+$/, '');
@@ -249,7 +262,7 @@ export const KkzNode = ({ data, id, selected }: any) => {
   };
 
   return (
-    <div className={`bg-zinc-900 border-2 rounded-2xl p-4 w-72 shadow-2xl transition-all duration-300 ${selected ? 'border-fuchsia-500 shadow-[0_0_25px_rgba(217,70,239,0.25)]' : 'border-zinc-800'}`}>
+    <div className={`bg-zinc-900 border-2 rounded-2xl p-4 w-48 shadow-2xl transition-all duration-300 ${selected ? 'border-fuchsia-500 shadow-[0_0_25px_rgba(217,70,239,0.25)]' : 'border-zinc-800'}`}>
       <div className="flex justify-between items-start mb-3">
         <div className="flex items-center gap-2">
           <div className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-500 shadow-[0_0_8px_#10b981] animate-pulse' : 'bg-zinc-700'}`} />
@@ -303,16 +316,15 @@ export const KkzNode = ({ data, id, selected }: any) => {
         {devices.map((name, i) => {
           const st = states[i];
           const isOn = !!st?.on;
-          const isArmed = armed[i] !== false;
           return (
-            <div key={i} className={`flex items-center gap-2 p-2 rounded-xl border ${isArmed ? 'border-zinc-700' : 'border-zinc-800 opacity-60'} bg-zinc-950`}>
+            <div key={i} className={`flex items-center gap-2 p-2 rounded-xl border ${isOn ? 'border-zinc-700' : 'border-zinc-800 opacity-60'} bg-zinc-950`}>
               <div
                 onClick={() => toggleDevice(i)}
                 onPointerDown={(e) => e.stopPropagation()}
-                className={`nodrag nopan relative w-9 h-5 rounded-full transition-colors ${isArmed ? 'bg-fuchsia-500' : 'bg-zinc-700'}`}
-                title={isArmed ? 'Включён в группу' : 'Отключён от группы'}
+                className={`nodrag nopan relative w-9 h-5 rounded-full transition-colors ${isOn ? 'bg-fuchsia-500' : 'bg-zinc-700'}`}
+                title={isOn ? 'Включён — нажми, чтобы выключить' : 'Выключен — нажми, чтобы включить'}
               >
-                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${isArmed ? 'left-4' : 'left-0.5'}`} />
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${isOn ? 'left-4' : 'left-0.5'}`} />
               </div>
               <div className="flex-1 min-w-0">
                 <div className={`text-[9px] font-bold truncate ${isOn ? 'text-emerald-400' : 'text-zinc-400'}`}>{name}</div>
@@ -363,22 +375,23 @@ export const KkzNode = ({ data, id, selected }: any) => {
         </button>
       </div>
 
-      {/* Входы управления с других нод (звук/таймер/LFO): слева по краю.
-          Значения 0-255, порог 128: >127 = ВКЛ, <=127 = ВЫКЛ. Команда
-          уходит только при переходе. */}
-      <div className="mt-3 pt-2 border-t border-zinc-800 flex items-center justify-between text-[8px] font-bold text-zinc-500">
-        <span className="flex items-center gap-1">
+      {/* Входы управления с других нод (звук/таймер/LFO): строки с пинами
+          слева по краю — как у MIDI-трека/палитры. Значения 0-255, порог
+          128: >127 = ВКЛ, <=127 = ВЫКЛ. Команда уходит только при переходе. */}
+      <div className="mt-3 pt-2 border-t border-zinc-800 space-y-0.5">
+        <div className="flex items-center gap-2 text-[8px] font-bold text-zinc-500 pb-1">
           <Plug size={8} className={inActive[0] ? 'text-fuchsia-400' : 'text-zinc-700'} />
           УПР. ВХОДЫ
-        </span>
-        <div className="flex gap-2 text-zinc-600">
-          <span className={inActive[1] ? 'text-fuchsia-400' : ''}>авт.1</span>
-          <span className={inActive[2] ? 'text-fuchsia-400' : ''}>авт.2</span>
         </div>
+        <CtrlRow id="dev-0-in" label="автомат 1: вкл/выкл" active={inActive[1]}
+          pinClass="!bg-sky-400" glow="#38bdf8" activeText="text-sky-400" />
+        <CtrlRow id="dev-1-in" label="автомат 2: вкл/выкл" active={inActive[2]}
+          pinClass="!bg-sky-400" glow="#38bdf8" activeText="text-sky-400" />
+        <CtrlRow id="master-in" label="главный: вкл/выкл" active={inActive[0]}
+          pinClass="!bg-fuchsia-400" glow="#d946ef" activeText="text-fuchsia-400" />
+        <CtrlRow id="off-in" label="ВЫКЛ всех (фронт 0→255)" active={inActive[3]}
+          pinClass="!bg-red-400" glow="#f87171" activeText="text-red-400" />
       </div>
-      <CtrlIn id="dev-0-in" label="Вход: автомат 1 — прямое вкл/выкл (0-255)" top="62%" active={inActive[1]} />
-      <CtrlIn id="dev-1-in" label="Вход: автомат 2 — прямое вкл/выкл (0-255)" top="74%" active={inActive[2]} />
-      <CtrlIn id="master-in" label="Вход: главный — ВКЛ/ВЫКЛ всех включённых автоматов (0-255)" top="86%" active={inActive[0]} />
     </div>
   );
 };

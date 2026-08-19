@@ -31,6 +31,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onAddNode, onAddMissing, onAutoLayout
                 <button onClick={() => onAddNode('midi-track')} title="MIDI-трек: реактивный свет по нотам" className="w-10 h-10 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-amber-400 hover:scale-110 transition-all font-bold text-[9px] leading-none text-center">TRACK</button>
                 <button onClick={() => onAddNode('music-track')} title="Трек: MP3 → автоанализ, источник для MIDI-трека" className="w-10 h-10 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-amber-300 hover:scale-110 transition-all font-bold text-[9px] leading-none text-center">ТРЕК</button>
                 <button onClick={() => onAddNode('palette')} title="Палитра верхнего света: сдвиг цвета и насыщенность" className="w-10 h-10 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-fuchsia-400 hover:scale-110 transition-all font-bold text-[9px] leading-none text-center">ПАЛ</button>
+                <button onClick={() => onAddNode('patch')} title="Патч-нода: DMX-адреса приборов (полотно двух юниверсов)" className="w-10 h-10 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-cyan-400 hover:scale-110 transition-all font-bold text-[9px] leading-none text-center">PATCH</button>
             </div>
 
             <div className="h-px w-8 bg-zinc-900" />
